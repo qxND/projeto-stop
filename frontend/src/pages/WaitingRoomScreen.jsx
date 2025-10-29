@@ -76,11 +76,8 @@ function WaitingRoomScreen() {
                     setSala(salaData); //
                     setError(''); //
 
-                    // Navega se o jogo começou
-                    if (salaData.status === 'in_progress' || salaData.status === 'scoring' || salaData.status === 'done') { //
-                        console.log(`Status da sala mudou para ${salaData.status}, navegando para /game/${salaId}`);
-                        navigate(`/game/${salaId}`); //
-                    }
+                    // Navega se o jogo começou (MOVEMOS ISSO PARA O SOCKET)
+
                      // Se a sala foi terminada ou abandonada enquanto esperava, volta ao lobby
                      if (salaData.status === 'terminada' || salaData.status === 'abandonada') {
                          console.log(`Sala ${salaId} com status ${salaData.status}, voltando ao lobby.`);
@@ -92,17 +89,31 @@ function WaitingRoomScreen() {
             } catch (err) { //
                 console.error('Erro ao buscar estado da sala:', err); //
                  if (isMounted) { //
-                    // Se receber 410 (Gone) ou 404, significa que a sala foi abandonada ou não existe
+                    // Se receber 410 (Gone) ou 404 (Not Found)...
                     if (err.response?.status === 404 || err.response?.status === 410) { //
-                         alert(err.response?.data?.error || 'Sala não encontrada ou abandonada. A redirecionar para o lobby.'); //
-                         navigate('/'); //
+                        
+                         // --- MODIFICAÇÃO CHAVE AQUI ---
+                         // Se a falha (404/410) ocorreu na *primeira tentativa* de carregamento...
+                        if (!initialLoadAttempted) {
+                            // ... é provável que seja a race condition. Não navegue.
+                            // Apenas exiba um erro temporário e deixe o polling tentar de novo.
+                            console.warn("Falha na busca inicial da sala (404/410). Provável race condition. Tentando novamente via polling...");
+                            setError('Conectando à sala... (tentativa 1 falhou, tentando de novo...)');
+                        } else {
+                            // Se a falha (404/410) ocorreu DEPOIS da carga inicial (no polling)...
+                            // ...aí sim a sala realmente foi abandonada ou não existe.
+                            alert(err.response?.data?.error || 'Sala não encontrada ou abandonada. A redirecionar para o lobby.'); //
+                            navigate('/'); //
+                        }
+                        // --- FIM DA MODIFICAÇÃO ---
+
                     } else { //
-                        // Mostra erro apenas se não for a primeira tentativa de carregamento
+                        // Outros erros (ex: 500)
                         if (initialLoadAttempted) { //
                            setError('Não foi possível atualizar o estado da sala. Tentando novamente...'); //
                         } else { //
                            setError('Falha ao carregar dados da sala. Verifique o ID ou tente novamente.');
-                           console.warn("Falha na busca inicial da sala."); //
+                           console.warn("Falha na busca inicial da sala (outro erro)."); //
                         }
                     }
                  }
@@ -137,10 +148,26 @@ function WaitingRoomScreen() {
                navigate('/');
            }
        };
+       
+       const handleGameStarted = (data) => {
+            console.log("Recebido 'round:ready' ou 'round:started'. Navegando para o jogo...", data);
+            if (isMounted) {
+                // Remove listeners específicos desta tela ANTES de navegar
+                socket.off('room:players_updated', handlePlayersUpdate);
+                socket.off('room:abandoned', handleRoomAbandoned);
+                socket.off('round:ready', handleGameStarted); // Desregistra este listener
+                socket.off('round:started', handleGameStarted); // E este também
+
+                navigate(`/game/${salaId}`); // Navega para a tela do jogo
+            }
+       };
 
        // Registra os listeners
        socket.on('room:players_updated', handlePlayersUpdate);
        socket.on('room:abandoned', handleRoomAbandoned);
+       socket.on('round:ready', handleGameStarted); // Ouve 'round:ready'
+       socket.on('round:started', handleGameStarted); // Ouve 'round:started' também por segurança
+       
        // Entra na sala do socket (caso não tenha entrado antes ou reconectou)
        socket.emit('join-room', String(salaId)); //
        console.log(`Socket join-room emitido para sala ${salaId}`);
@@ -156,6 +183,8 @@ function WaitingRoomScreen() {
            // Desregistra os listeners
            socket.off('room:players_updated', handlePlayersUpdate);
            socket.off('room:abandoned', handleRoomAbandoned);
+           socket.off('round:ready', handleGameStarted); // Garante desregistro
+           socket.off('round:started', handleGameStarted); // Garante desregistro
         };
     }, [salaId, navigate]); //
 
@@ -165,12 +194,13 @@ function WaitingRoomScreen() {
              <div className="text-white text-center p-10 flex flex-col items-center justify-center gap-4"> {/* */}
                <Loader2 className="animate-spin h-10 w-10 text-blue-400" /> {/* */}
                <p>A entrar na sala #{salaId}...</p> {/* */}
-               {error && <p className="text-red-400 mt-2">{error}</p>} {/* */}
+               {/* Exibe o erro de "tentando de novo" aqui */}
+               {error && <p className="text-yellow-400 mt-2">{error}</p>} {/* */}
              </div>
         );
     }
 
-    // --- Renderização Principal ---
+    // --- Renderização Principal (sem alteração) ---
     return ( //
         <div className="p-4 md:p-8 text-white max-w-2xl mx-auto relative"> {/* */}
             {/* Botão Sair */}
@@ -218,6 +248,7 @@ function WaitingRoomScreen() {
                       : sala.status // Mostra o status literal se for outro
                     } {/* */}
                  </p>
+                 {/* Exibe o erro do polling (se houver) */}
                  {error && <p className="text-red-400 mt-2 text-sm">{error}</p>} {/* */}
             </div>
 
@@ -251,8 +282,8 @@ function WaitingRoomScreen() {
                             className="px-8 py-3 md:px-10 md:py-4 bg-green-600 rounded-lg font-bold text-lg md:text-xl hover:bg-green-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-transform hover:scale-105 flex items-center justify-center gap-2 mx-auto" //
                             title={sala.jogadores?.length < 2 ? "Precisa de pelo menos 2 jogadores para iniciar" : "Iniciar a partida"} //
                         >
-                            {loading ? <Loader2 className="animate-spin" /> : <Play />} {/* */}
-                            {loading ? 'A Iniciar...' : 'Iniciar Partida'} {/* */}
+                            {loading && !leaving ? <Loader2 className="animate-spin" /> : <Play />} {/* Garante que não mostra loading se estiver saindo */} {/* */}
+                            {loading && !leaving ? 'A Iniciar...' : 'Iniciar Partida'} {/* */}
                         </button>
                     )}
                     {/* Mensagem de espera para não criadores */}

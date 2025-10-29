@@ -1,13 +1,14 @@
-// frontend/src/main.jsx
+// frontend/src/main.jsx (Atualizado)
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 
 import App from './App'
+import HomeScreen from './pages/Homescreen'
 import LobbyScreen from './pages/LobbyScreen'
 import GameScreen from './pages/GameScreen'
 import ShopScreen from './pages/ShopScreen'
-import WaitingRoomScreen from './pages/WaitingRoomScreen' // <--- IMPORTAR TELA DE ESPERA
+import WaitingRoomScreen from './pages/WaitingRoomScreen'
 import Login from './pages/Login'
 import './index.css'
 
@@ -18,15 +19,34 @@ function RequireAuth({ children }) {
 }
 
 const router = createBrowserRouter([
-  { path: '/login', element: <Login /> },
+  {
+    path: '/login',
+    element: <Login />
+  },
   {
     path: '/',
     element: <RequireAuth><App /></RequireAuth>,
     children: [
-      { path: '/', element: <LobbyScreen /> },
-      { path: '/waiting/:salaId', element: <WaitingRoomScreen /> }, // <--- ADICIONAR ROTA DE ESPERA
-      { path: '/game/:salaId', element: <GameScreen /> },
-      { path: '/shop', element: <ShopScreen /> },
+      {
+        index: true, // <-- MUDANÇA 1: Index agora é HomeScreen
+        element: <HomeScreen />
+      },
+      {
+        path: 'lobby', // <-- MUDANÇA 2: Rota específica para o Lobby
+        element: <LobbyScreen />
+      },
+      {
+        path: 'waiting/:salaId',
+        element: <WaitingRoomScreen />
+      },
+      {
+        path: 'game/:salaId',
+        element: <GameScreen />
+      },
+      {
+        path: 'shop',
+        element: <ShopScreen />
+      },
     ],
   },
 ])

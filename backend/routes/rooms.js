@@ -19,6 +19,9 @@ router.post('/', requireAuth, async (req, res) => {
 
     await supa.from('jogador_sala').insert({ jogador_id, sala_id: sala.sala_id });
 
+    // LOG DE CONFIRMAÇÃO ADICIONADO
+    console.log(`---> [POST /rooms] Sala ${sala.sala_id} criada com sucesso.`);
+
     res.json({ sala_id: sala.sala_id, host_user: jogador_id });
   } catch (e) {
     console.error('[POST /rooms] Error:', e);
@@ -28,10 +31,11 @@ router.post('/', requireAuth, async (req, res) => {
 
 // --- ROTA EXISTENTE: Entrar sala (COM LOGS ADICIONADOS) ---
 router.post('/join', requireAuth, async (req, res) => {
-  const { sala_id } = req.body; // Pega sala_id do corpo da requisição
-  const jogador_id = req.user.jogador_id; // Pega jogador_id do middleware de autenticação
-
-  console.log(`---> [POST /rooms/join] REQUISIÇÃO RECEBIDA por jogador ${jogador_id} para sala ${sala_id}`); // Log inicial
+  // --- CORREÇÃO DE TIPO DE DADO ---
+  const sala_id = Number(req.body.sala_id); // Converte para Number
+  const jogador_id = req.user.jogador_id;
+  
+  console.log(`---> [POST /rooms/join] REQUISIÇÃO RECEBIDA por jogador ${jogador_id} para sala ${sala_id}`);
 
   try {
     if (!sala_id) {
@@ -39,14 +43,15 @@ router.post('/join', requireAuth, async (req, res) => {
         return res.status(400).json({ error: 'sala_id required' });
     }
 
-    // Verifica se a sala existe E SE AINDA ESTÁ AGUARDANDO JOGADORES
+    // ... (resto da rota /join, que já deve estar correta)
     console.log(`---> [POST /rooms/join] Verificando status da sala ${sala_id}...`);
     const { data: salaData, error: salaError } = await supa
         .from('sala')
         .select('status, jogador_criador_id')
-        .eq('sala_id', sala_id)
+        .eq('sala_id', sala_id) // .eq() funciona bem com Number
         .single();
-
+    
+    // ... (resto da lógica /join)
     if (salaError) {
         console.error(`---> [POST /rooms/join] Erro ao buscar sala ${sala_id}:`, salaError);
         throw salaError;
@@ -55,10 +60,7 @@ router.post('/join', requireAuth, async (req, res) => {
         console.log(`---> [POST /rooms/join] Erro: Sala ${sala_id} não encontrada.`);
         return res.status(404).json({ error: 'Sala não encontrada' });
     }
-
     console.log(`---> [POST /rooms/join] Status da sala ${sala_id}: '${salaData.status}'. Criador: ${salaData.jogador_criador_id}`);
-
-    // Impede entrada se a sala não estiver esperando ou se o jogador já for o criador
     if (salaData.status !== 'waiting') {
         console.log(`---> [POST /rooms/join] Erro: Sala ${sala_id} não está 'waiting' (status: ${salaData.status}).`);
         return res.status(400).json({ error: 'Sala não está aguardando jogadores (status: ' + salaData.status + ')' });
@@ -67,24 +69,16 @@ router.post('/join', requireAuth, async (req, res) => {
         console.log(`---> [POST /rooms/join] Erro: Criador ${jogador_id} tentou usar /join.`);
         return res.status(400).json({ error: 'Criador não pode usar /join para re-entrar.' });
     }
-
-
-    // Adiciona o jogador à sala (Upsert para evitar duplicatas se ele já estava)
     console.log(`---> [POST /rooms/join] Tentando UPSERT jogador ${jogador_id} na sala ${sala_id}...`);
     const { error: upsertError } = await supa
         .from('jogador_sala')
         .upsert({ jogador_id, sala_id }, { onConflict: 'jogador_id, sala_id' });
-
     if (upsertError) {
-        // Log específico para o erro do upsert
         console.error(`---> [POST /rooms/join] ERRO NO UPSERT para jogador ${jogador_id} na sala ${sala_id}:`, upsertError);
-        // Rethrow para cair no catch geral, a menos que seja um erro específico que queremos tratar aqui
         throw upsertError;
     } else {
         console.log(`---> [POST /rooms/join] UPSERT de jogador ${jogador_id} na sala ${sala_id} bem-sucedido.`);
     }
-
-    // EMITIR EVENTO SOCKET PARA ATUALIZAR LISTA DE JOGADORES EM TEMPO REAL
     const io = getIO();
     if (io) {
        console.log(`---> [POST /rooms/join] Buscando jogadores atualizados para emitir evento...`);
@@ -102,15 +96,11 @@ router.post('/join', requireAuth, async (req, res) => {
     } else {
         console.warn(`---> [POST /rooms/join] Instância do Socket.IO não encontrada. Não foi possível emitir evento.`);
     }
-
     console.log(`---> [POST /rooms/join] Resposta enviada com sucesso para jogador ${jogador_id}.`);
     res.json({ sala_id, guest_user: jogador_id });
 
   } catch (e) {
-    // Log no CATCH geral da rota /join
     console.error(`---> [POST /rooms/join] ERRO GERAL NO CATCH para sala ${sala_id} por jogador ${jogador_id}:`, e);
-
-    // Trata erro de chave única (jogador já na sala) de forma mais amigável
     if (e.code === '23505' || (e.message && e.message.includes('jogador_sala_pkey'))) {
         console.warn(`---> [POST /rooms/join] Capturado erro de chave única (23505). Verificando se jogador ${jogador_id} realmente está na sala ${sala_id}...`);
          const { data: checkData, error: checkError } = await supa
@@ -126,11 +116,10 @@ router.post('/join', requireAuth, async (req, res) => {
               console.error(`---> [POST /rooms/join] Erro de chave única, mas jogador ${jogador_id} não encontrado na verificação!? Erro check:`, checkError);
               return res.status(409).json({ error: 'Jogador já está nesta sala (ou erro ao verificar).' });
          }
-    } else if (e.code === 'PGRST116') { // Erro "Sala não encontrada" vindo do select inicial
+    } else if (e.code === 'PGRST116') {
         console.log(`---> [POST /rooms/join] Erro no catch: Sala ${sala_id} não encontrada (PGRST116).`);
         return res.status(404).json({ error: 'Sala não encontrada.' });
     }
-    // Outros erros
     res.status(500).json({ error: e.message });
   }
 });
@@ -138,24 +127,21 @@ router.post('/join', requireAuth, async (req, res) => {
 // --- NOVA ROTA: Sair da sala ---
 router.post('/:salaId/leave', requireAuth, async (req, res) => {
    try {
-       const { salaId } = req.params;
+       // --- CORREÇÃO DE TIPO DE DADO ---
+       const salaId = Number(req.params.salaId); // Converte para Number
        const jogador_id = req.user.jogador_id;
 
        console.log(`---> [LEAVE /rooms/${salaId}/leave] REQUISIÇÃO RECEBIDA por jogador ${jogador_id}`);
 
-       // 1. Busca dados da sala para verificar status e criador
+       // ... (resto da lógica /leave)
        const { data: salaData, error: salaError } = await supa
            .from('sala')
            .select('status, jogador_criador_id')
            .eq('sala_id', salaId)
            .maybeSingle();
-
        if (salaError) throw salaError;
-
        console.log(`---> [LEAVE /rooms/${salaId}/leave] Dados da sala encontrados:`, salaData);
-
        let salaAbandonada = false;
-       // 2. Se a sala existe e o jogador é o criador e a sala está 'waiting'
        if (salaData && salaData.jogador_criador_id === jogador_id && salaData.status === 'waiting') {
            console.log(`---> [LEAVE /rooms/${salaId}/leave] CONDIÇÃO DE ABANDONO ATENDIDA! Atualizando status...`);
            const { error: updateError } = await supa
@@ -170,17 +156,12 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
        } else {
            console.log(`---> [LEAVE /rooms/${salaId}/leave] Condição de abandono NÃO atendida (Criador=${salaData?.jogador_criador_id}, Status=${salaData?.status})`);
        }
-
-       // 3. Remove o jogador da tabela jogador_sala
        const { error: deleteError } = await supa
            .from('jogador_sala')
            .delete()
            .eq('sala_id', salaId)
            .eq('jogador_id', jogador_id);
-
        console.log(`---> [LEAVE /rooms/${salaId}/leave] Jogador ${jogador_id} removido de jogador_sala (Erro: ${deleteError ? deleteError.message : 'Nenhum'})`);
-
-       // 4. Emite evento de atualização/abandono para outros jogadores
        const io = getIO();
        if (io) {
            if (salaAbandonada) {
@@ -202,7 +183,6 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
        } else {
             console.warn(`---> [LEAVE /rooms/${salaId}/leave] Instância do Socket.IO não encontrada.`);
        }
-
        res.json({ success: true, message: 'Você saiu da sala.' });
 
    } catch (e) {
@@ -215,7 +195,9 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
 // --- ROTA EXISTENTE: Obter detalhes da sala ---
 router.get('/:salaId', requireAuth, async (req, res) => {
     try {
-        const { salaId } = req.params;
+        // --- CORREÇÃO DE TIPO DE DADO ---
+        const salaId = Number(req.params.salaId); // Converte para Number
+        // -------------------------
         const current_jogador_id = req.user.jogador_id;
 
         console.log(`---> [GET /rooms/${salaId}] REQUISIÇÃO RECEBIDA por jogador ${current_jogador_id}`);
@@ -230,7 +212,7 @@ router.get('/:salaId', requireAuth, async (req, res) => {
                 jogador:jogador_criador_id ( nome_de_usuario ),
                 temas_excluidos, letras_excluidas
             `)
-            .eq('sala_id', salaId)
+            .eq('sala_id', salaId) // Agora 'salaId' é um Number
             .single();
 
         if (salaError) throw salaError;
@@ -239,30 +221,21 @@ router.get('/:salaId', requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'Sala não encontrada.' });
         }
 
+        // ... (resto da lógica /:salaId)
         console.log(`---> [GET /rooms/${salaId}] Status encontrado no banco: '${salaData.status}'`);
-
         if (salaData.status === 'abandonada') {
             console.log(`---> [GET /rooms/${salaId}] Status é 'abandonada'. Retornando 410 Gone.`);
             return res.status(410).json({ error: 'Esta sala foi abandonada pelo criador.' });
         }
-
         console.log(`---> [GET /rooms/${salaId}] Status OK. Buscando jogadores...`);
-
-        // 2. Busca jogadores na sala
         const { data: jogadoresData, error: jogadoresError } = await supa
             .from('jogador_sala')
             .select(`jogador:jogador_id ( jogador_id, nome_de_usuario )`)
             .eq('sala_id', salaId);
-
         if (jogadoresError) throw jogadoresError;
-
         const jogadoresNaSala = (jogadoresData || []).map(js => js.jogador?.nome_de_usuario || `Jogador ${js.jogador?.jogador_id}`);
         console.log(`---> [GET /rooms/${salaId}] Jogadores encontrados:`, jogadoresNaSala);
-
-        // 3. Determina se o usuário atual é o criador
         const is_creator = salaData.jogador_criador_id === current_jogador_id;
-
-        // 4. Monta a resposta
         const responseData = {
             sala_id: salaData.sala_id,
             nome_sala: salaData.nome_sala,
@@ -276,7 +249,6 @@ router.get('/:salaId', requireAuth, async (req, res) => {
             letras_excluidas: salaData.letras_excluidas || [],
             is_creator: is_creator
         };
-
         res.json(responseData);
 
     } catch (e) {

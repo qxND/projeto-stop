@@ -9,7 +9,7 @@ import authRouter from '../routes/auth.js'
 import roomsRouter from '../routes/rooms.js'
 import answersRouter from '../routes/answers.js'
 import matchesRouter from '../routes/matches.js'
-import shopRouter from '../routes/shop.js'
+import shopRouter from '../routes/shop.js'; 
 
 import { initSockets } from './sockets.js'
 
@@ -23,7 +23,7 @@ app.use('/auth', authRouter)
 app.use('/rooms', roomsRouter)
 app.use('/answers', answersRouter)
 app.use('/matches', matchesRouter)
-app.use('/shop', shopRouter)
+app.use('/shop', shopRouter);
 
 // Healthcheck
 app.get('/health', (req, res) => res.json({ ok: true }))
