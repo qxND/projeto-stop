@@ -1,6 +1,6 @@
 // backend/routes/shop.js
 import { Router } from 'express';
-import { supa } from '../services/supabase.js';
+import { supabaseAdmin } from '../services/supabase.js';
 import { requireAuth } from '../middlewares/requireAuth.js'; // Reutiliza o middleware de autenticação
 
 const router = Router();
@@ -8,7 +8,7 @@ const router = Router();
 // GET /shop/items - Lista todos os power-ups disponíveis na loja
 router.get('/items', async (req, res) => {
   try {
-    const { data, error } = await supa
+    const { data, error } = await supabaseAdmin
       .from('power_up')
       .select('power_up_id, codigo_identificador, nome, descricao, preco')
       .order('preco', { ascending: true });
@@ -27,7 +27,7 @@ router.get('/inventory', requireAuth, async (req, res) => {
     const jogador_id = req.user.jogador_id;
 
     // Busca moedas do jogador
-    const { data: jogadorData, error: jogadorError } = await supa
+    const { data: jogadorData, error: jogadorError } = await supabaseAdmin
       .from('jogador')
       .select('moedas')
       .eq('jogador_id', jogador_id)
@@ -37,7 +37,7 @@ router.get('/inventory', requireAuth, async (req, res) => {
     if (!jogadorData) return res.status(404).json({ error: 'Jogador não encontrado' });
 
     // Busca inventário do jogador (join com power_up para pegar detalhes)
-    const { data: inventoryData, error: inventoryError } = await supa
+    const { data: inventoryData, error: inventoryError } = await supabaseAdmin
       .from('jogador_power_up')
       .select(`
         quantidade,
@@ -74,7 +74,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
     }
 
     // 1. Busca detalhes do power-up (preço) e moedas do jogador
-    const { data: powerUpData, error: powerUpError } = await supa
+    const { data: powerUpData, error: powerUpError } = await supabaseAdmin
       .from('power_up')
       .select('preco')
       .eq('power_up_id', power_up_id)
@@ -83,7 +83,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
     if (powerUpError) throw powerUpError;
     if (!powerUpData) return res.status(404).json({ error: 'Power-up não encontrado' });
 
-    const { data: jogadorData, error: jogadorError } = await supa
+    const { data: jogadorData, error: jogadorError } = await supabaseAdmin
       .from('jogador')
       .select('moedas')
       .eq('jogador_id', jogador_id)
@@ -100,12 +100,12 @@ router.post('/purchase', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Moedas insuficientes' });
     }
 
-    // 3. Tenta realizar a transação (idealmente usar transação SQL, mas Supabase JS client limita)
+    // 3. Tenta realizar a transação (idealmente usar transação SQL, mas supabaseAdminbase JS client limita)
     //    Vamos fazer em duas etapas: debitar moedas e depois adicionar/incrementar item.
 
     // 3.1 Debitar moedas
     const novo_saldo = moedas_jogador - preco_item;
-    const { error: updateMoedasError } = await supa
+    const { error: updateMoedasError } = await supabaseAdmin
       .from('jogador')
       .update({ moedas: novo_saldo })
       .eq('jogador_id', jogador_id);
@@ -117,7 +117,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
 
     // 3.2 Adicionar/Incrementar item no inventário (UPSERT)
     // Tenta incrementar a quantidade se o registro (jogador_id, power_up_id) já existe
-    const { data: existingEntry, error: selectError } = await supa
+    const { data: existingEntry, error: selectError } = await supabaseAdmin
       .from('jogador_power_up')
       .select('jogador_power_up_id, quantidade')
       .eq('jogador_id', jogador_id)
@@ -129,7 +129,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
         upsertError = selectError;
     } else if (existingEntry) {
         // Atualiza quantidade
-        const { error: updateError } = await supa
+        const { error: updateError } = await supabaseAdmin
             .from('jogador_power_up')
             .update({
                 quantidade: existingEntry.quantidade + quantidade_compra,
@@ -139,7 +139,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
         upsertError = updateError;
     } else {
         // Insere novo registro
-        const { error: insertError } = await supa
+        const { error: insertError } = await supabaseAdmin
             .from('jogador_power_up')
             .insert({
                 jogador_id: jogador_id,
@@ -154,7 +154,7 @@ router.post('/purchase', requireAuth, async (req, res) => {
     if (upsertError) {
       // Tenta devolver o dinheiro se o upsert falhar (best-effort)
        console.warn(`Falha ao atualizar inventário para ${jogador_id}, tentando devolver ${preco_item} moedas.`);
-       await supa
+       await supabaseAdmin
           .from('jogador')
           .update({ moedas: moedas_jogador }) // Volta ao saldo original
           .eq('jogador_id', jogador_id);
@@ -182,7 +182,7 @@ router.post('/add-coins', requireAuth, async (req, res) => {
         }
 
         // Busca saldo atual
-        const { data: jogador, error: getError } = await supa
+        const { data: jogador, error: getError } = await supabaseAdmin
             .from('jogador')
             .select('moedas')
             .eq('jogador_id', jogador_id)
@@ -194,7 +194,7 @@ router.post('/add-coins', requireAuth, async (req, res) => {
         const novoSaldo = (jogador.moedas || 0) + amount;
 
         // Atualiza saldo no banco
-        const { error: updateError } = await supa
+        const { error: updateError } = await supabaseAdmin
             .from('jogador')
             .update({ moedas: novoSaldo })
             .eq('jogador_id', jogador_id);

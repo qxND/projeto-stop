@@ -1,6 +1,6 @@
 // backend/routes/rooms.js
 import { Router } from 'express';
-import { supa } from '../services/supabase.js';
+import { supabaseAdmin } from '../services/supabase.js';
 import { requireAuth } from '../middlewares/requireAuth.js';
 import { getIO } from '../src/sockets.js';
 
@@ -12,12 +12,12 @@ router.post('/', requireAuth, async (req, res) => {
     const jogador_id = req.user.jogador_id;
     const { nome_sala = 'Sala' } = req.body;
 
-    const { data: sala, error } = await supa.from('sala')
+    const { data: sala, error } = await supabaseAdmin.from('sala')
       .insert({ jogador_criador_id: jogador_id, nome_sala, status: 'waiting' })
       .select('*').single();
     if (error) throw error;
 
-    await supa.from('jogador_sala').insert({ jogador_id, sala_id: sala.sala_id });
+    await supabaseAdmin.from('jogador_sala').insert({ jogador_id, sala_id: sala.sala_id });
 
     // LOG DE CONFIRMAÇÃO ADICIONADO
     console.log(`---> [POST /rooms] Sala ${sala.sala_id} criada com sucesso.`);
@@ -45,7 +45,7 @@ router.post('/join', requireAuth, async (req, res) => {
 
     // ... (resto da rota /join, que já deve estar correta)
     console.log(`---> [POST /rooms/join] Verificando status da sala ${sala_id}...`);
-    const { data: salaData, error: salaError } = await supa
+    const { data: salaData, error: salaError } = await supabaseAdmin
         .from('sala')
         .select('status, jogador_criador_id')
         .eq('sala_id', sala_id) // .eq() funciona bem com Number
@@ -70,7 +70,7 @@ router.post('/join', requireAuth, async (req, res) => {
         return res.status(400).json({ error: 'Criador não pode usar /join para re-entrar.' });
     }
     console.log(`---> [POST /rooms/join] Tentando UPSERT jogador ${jogador_id} na sala ${sala_id}...`);
-    const { error: upsertError } = await supa
+    const { error: upsertError } = await supabaseAdmin
         .from('jogador_sala')
         .upsert({ jogador_id, sala_id }, { onConflict: 'jogador_id, sala_id' });
     if (upsertError) {
@@ -82,7 +82,7 @@ router.post('/join', requireAuth, async (req, res) => {
     const io = getIO();
     if (io) {
        console.log(`---> [POST /rooms/join] Buscando jogadores atualizados para emitir evento...`);
-       const { data: jogadoresAtualizadosData, error: jogadoresError } = await supa
+       const { data: jogadoresAtualizadosData, error: jogadoresError } = await supabaseAdmin
            .from('jogador_sala')
            .select('jogador:jogador_id ( jogador_id, nome_de_usuario )')
            .eq('sala_id', sala_id);
@@ -103,7 +103,7 @@ router.post('/join', requireAuth, async (req, res) => {
     console.error(`---> [POST /rooms/join] ERRO GERAL NO CATCH para sala ${sala_id} por jogador ${jogador_id}:`, e);
     if (e.code === '23505' || (e.message && e.message.includes('jogador_sala_pkey'))) {
         console.warn(`---> [POST /rooms/join] Capturado erro de chave única (23505). Verificando se jogador ${jogador_id} realmente está na sala ${sala_id}...`);
-         const { data: checkData, error: checkError } = await supa
+         const { data: checkData, error: checkError } = await supabaseAdmin
             .from('jogador_sala')
             .select('jogador_id')
             .eq('jogador_id', req.user.jogador_id)
@@ -134,7 +134,7 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
        console.log(`---> [LEAVE /rooms/${salaId}/leave] REQUISIÇÃO RECEBIDA por jogador ${jogador_id}`);
 
        // ... (resto da lógica /leave)
-       const { data: salaData, error: salaError } = await supa
+       const { data: salaData, error: salaError } = await supabaseAdmin
            .from('sala')
            .select('status, jogador_criador_id')
            .eq('sala_id', salaId)
@@ -144,7 +144,7 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
        let salaAbandonada = false;
        if (salaData && salaData.jogador_criador_id === jogador_id && salaData.status === 'waiting') {
            console.log(`---> [LEAVE /rooms/${salaId}/leave] CONDIÇÃO DE ABANDONO ATENDIDA! Atualizando status...`);
-           const { error: updateError } = await supa
+           const { error: updateError } = await supabaseAdmin
                .from('sala')
                .update({ status: 'abandonada' })
                .eq('sala_id', salaId);
@@ -156,7 +156,7 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
        } else {
            console.log(`---> [LEAVE /rooms/${salaId}/leave] Condição de abandono NÃO atendida (Criador=${salaData?.jogador_criador_id}, Status=${salaData?.status})`);
        }
-       const { error: deleteError } = await supa
+       const { error: deleteError } = await supabaseAdmin
            .from('jogador_sala')
            .delete()
            .eq('sala_id', salaId)
@@ -168,7 +168,7 @@ router.post('/:salaId/leave', requireAuth, async (req, res) => {
                console.log(`---> [LEAVE /rooms/${salaId}/leave] Emitindo room:abandoned para sala ${salaId}`);
                io.to(String(salaId)).emit('room:abandoned', { message: 'O criador abandonou a sala.' });
            } else if (salaData && salaData.status === 'waiting') {
-               const { data: jogadoresAtualizadosData, error: jogadoresError } = await supa
+               const { data: jogadoresAtualizadosData, error: jogadoresError } = await supabaseAdmin
                    .from('jogador_sala')
                    .select('jogador:jogador_id ( jogador_id, nome_de_usuario )')
                    .eq('sala_id', salaId);
@@ -205,7 +205,7 @@ router.get('/:salaId', requireAuth, async (req, res) => {
         if (!salaId) return res.status(400).json({ error: 'ID da sala é obrigatório.' });
 
         // 1. Busca detalhes da sala
-        const { data: salaData, error: salaError } = await supa
+        const { data: salaData, error: salaError } = await supabaseAdmin
             .from('sala')
             .select(`
                 sala_id, nome_sala, status, jogador_criador_id,
@@ -228,7 +228,7 @@ router.get('/:salaId', requireAuth, async (req, res) => {
             return res.status(410).json({ error: 'Esta sala foi abandonada pelo criador.' });
         }
         console.log(`---> [GET /rooms/${salaId}] Status OK. Buscando jogadores...`);
-        const { data: jogadoresData, error: jogadoresError } = await supa
+        const { data: jogadoresData, error: jogadoresError } = await supabaseAdmin
             .from('jogador_sala')
             .select(`jogador:jogador_id ( jogador_id, nome_de_usuario )`)
             .eq('sala_id', salaId);

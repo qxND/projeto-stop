@@ -1,8 +1,9 @@
-// src/pages/Login.jsx
+// frontend/src/pages/Login.jsx
 import { useState } from 'react'
 import api from '../lib/api'
 import { useNavigate } from 'react-router-dom'
 import FaultyTerminalR3F from '../components/FaultyTerminalR3F'
+import { connectSocket } from '../lib/socket'   // <-- novo helper
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true)
@@ -13,20 +14,31 @@ export default function Login() {
   const [error, setError] = useState('')
   const nav = useNavigate()
 
+  const finishAuth = (data) => {
+    // padroniza chaves no localStorage
+    localStorage.setItem('token', data.access_token || '')
+    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+    if (data.jogador?.jogador_id) localStorage.setItem('meuJogadorId', String(data.jogador.jogador_id))
+    // conecta socket com token
+    connectSocket(data.access_token || '')
+    nav('/')
+  }
+
   const submit = async (e) => {
     e.preventDefault()
     setLoading(true); setError('')
     try {
       if (isLogin) {
         const { data } = await api.post('/auth/login', { email, password })
-        localStorage.setItem('token', data.token)
-        localStorage.setItem('meuJogadorId', String(data.jogador.jogador_id))
-        nav('/')
+        finishAuth(data)
       } else {
         const { data } = await api.post('/auth/register', { email, password, nome_de_usuario: username })
-        localStorage.setItem('token', data.token)
-        localStorage.setItem('meuJogadorId', String(data.jogador.jogador_id))
-        nav('/')
+        if (data.require_email_confirmation) {
+          setError('Verifique seu e-mail para confirmar a conta.')
+          return
+        }
+        // quando SKIP_CONFIRM=true, o backend já devolve access/refresh
+        finishAuth(data)
       }
     } catch (e) {
       setError(e.response?.data?.error || e.message)

@@ -1,7 +1,7 @@
 // backend/src/sockets.js
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import { supa } from '../services/supabase.js'; //
+import { supabaseAdmin } from '../services/supabase.js'; //
 import { endRoundAndScore, getNextRoundForSala, getJogadoresDaSala, getRoundResults } from '../services/game.js'; //
 
 const JWT_SECRET = process.env.JWT_SECRET || 'developer_secret_key'; //
@@ -156,7 +156,7 @@ async function adicionarMoedas(jogadorId, quantidade) {
       END;
       $$ LANGUAGE plpgsql;
       */
-      const { error } = await supa.rpc('adicionar_moedas', {
+      const { error } = await supabaseAdmin.rpc('adicionar_moedas', {
           jogador_id_param: jogadorId,
           quantidade_param: quantidade
       });
@@ -239,7 +239,7 @@ export function scheduleRoundCountdown({ salaId, roundId, duration = 20 }) { //
         // --- LÓGICA DE REVELAÇÃO (APÓS PONTUAÇÃO) ---
         const revealRequesters = getAndClearRevealRequests(salaId, roundId); //
         if (revealRequesters.size > 0) { //
-             const { data: respostasFinais, error: errRespostas } = await supa //
+             const { data: respostasFinais, error: errRespostas } = await supabaseAdmin //
                 .from('participacao_rodada') //
                 .select('jogador_id, tema_nome, resposta') //
                 .eq('rodada_id', roundId); //
@@ -297,7 +297,7 @@ export function scheduleRoundCountdown({ salaId, roundId, duration = 20 }) { //
                 // Código para iniciar a próxima rodada
                 console.log(`[TIMER->NEXT_ROUND] Iniciando próxima rodada ${next.rodada_id} para sala ${salaId}`);
                 // Atualiza status da próxima rodada para 'in_progress'
-                await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id); //
+                await supabaseAdmin.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id); //
                 io.to(salaId).emit('round:ready', next); //
                 io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration }); // Usar a mesma duração
                 scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration }); //
@@ -320,7 +320,7 @@ export function scheduleRoundCountdown({ salaId, roundId, duration = 20 }) { //
 
           // ATUALIZA STATUS DA SALA PARA 'terminada'
           console.log(`[TIMER->MATCH_END] Atualizando sala ${salaId} para 'terminada'`);
-          const { error: updateSalaError } = await supa
+          const { error: updateSalaError } = await supabaseAdmin
             .from('sala') //
             .update({ status: 'terminada' }) // Novo status
             .eq('sala_id', salaId); //
@@ -351,23 +351,41 @@ export function initSockets(httpServer) { //
   io = new Server(httpServer, { cors: { origin: '*' } }); //
 
   // Middleware de Autenticação Socket.IO (pega token da handshake)
-  io.use((socket, next) => { //
-    const token = socket.handshake.auth.token; // Pega token da propriedade 'auth'
-    if (!token) { //
-      console.warn("Socket connection attempt without token");
-      return next(new Error('Authentication error: Token missing'));
-    }
+  io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('Authentication error: Token missing'));
+
+    // 1) Tenta legado (JWT interno da sua API)
     try {
-      const payload = jwt.verify(token, JWT_SECRET); //
-      // Adiciona jogador_id aos dados do socket para uso posterior
-      socket.data.jogador_id = payload.sub; //
-      console.log(`Socket authenticated for jogador_id: ${socket.data.jogador_id}`);
-      next();
-    } catch (err) { //
-      console.warn(`Socket connection attempt with invalid token: ${err.message}`);
-      return next(new Error('Authentication error: Invalid token')); //
+      const payload = jwt.verify(token, JWT_SECRET);
+      socket.data.jogador_id = Number(payload.sub);
+      return next();
+    } catch (_) { /* segue para Supabase */ }
+
+    // 2) Supabase access_token
+    const { data, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !data?.user?.email) {
+      return next(new Error('Authentication error: Invalid Supabase token'));
     }
-  });
+
+    // Resolve jogador_id pela sua tabela legada (por email)
+    const { data: jogadorRow, error: jErr } = await supabaseAdmin
+      .from('jogador')
+      .select('jogador_id, email')
+      .eq('email', data.user.email)
+      .maybeSingle();
+
+    if (jErr || !jogadorRow) {
+      return next(new Error('Authentication error: jogador não encontrado'));
+    }
+
+    socket.data.jogador_id = Number(jogadorRow.jogador_id);
+    next();
+  } catch (err) {
+    next(new Error('Authentication error: ' + err.message));
+  }
+});
 
   io.on('connection', (socket) => { //
     console.log('a user connected:', socket.id, 'jogador_id:', socket.data.jogador_id); //
@@ -408,9 +426,9 @@ export function initSockets(httpServer) { //
                         return;
                     }
                     console.log(`[STOP->NEXT_ROUND] Iniciando próxima rodada ${next.rodada_id} para sala ${salaId}`);
-                    await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id);
+                    await supabaseAdmin.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id);
                     io.to(salaId).emit('round:ready', next);
-                    const qTempo = await supa.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single();
+                    const qTempo = await supabaseAdmin.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single();
                     const duration = qTempo.data?.tempo?.valor || 20;
                     io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration });
                     scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration });
@@ -445,9 +463,9 @@ export function initSockets(httpServer) { //
                          return;
                      }
                      console.log(`[STOP->NEXT_ROUND] Iniciando próxima rodada ${next.rodada_id} para sala ${salaId}`);
-                     await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id);
+                     await supabaseAdmin.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id);
                      io.to(salaId).emit('round:ready', next);
-                     const qTempo = await supa.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single();
+                     const qTempo = await supabaseAdmin.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single();
                      const duration = qTempo.data?.tempo?.valor || 20;
                      io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration });
                      scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration });
@@ -472,7 +490,7 @@ export function initSockets(httpServer) { //
          const revealRequesters = getAndClearRevealRequests(salaId, roundId); //
         if (revealRequesters.size > 0) { //
             // ... (código de revelação igual ao do timer) ...
-             const { data: respostasFinais, error: errRespostas } = await supa //
+             const { data: respostasFinais, error: errRespostas } = await supabaseAdmin //
                 .from('participacao_rodada') //
                 .select('jogador_id, tema_nome, resposta') //
                 .eq('rodada_id', roundId); //
@@ -525,10 +543,10 @@ export function initSockets(httpServer) { //
                 }
                 // Código para iniciar a próxima rodada
                 console.log(`[STOP->NEXT_ROUND] Iniciando próxima rodada ${next.rodada_id} para sala ${salaId}`);
-                await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id); //
+                await supabaseAdmin.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id); //
                 io.to(salaId).emit('round:ready', next); //
                 // Precisa pegar a duração original da rodada anterior ou ter um padrão
-                const qTempo = await supa.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single(); //
+                const qTempo = await supabaseAdmin.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single(); //
                 const duration = qTempo.data?.tempo?.valor || 20; // Default 20s
                 io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration }); //
                 scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration }); //
@@ -550,7 +568,7 @@ export function initSockets(httpServer) { //
 
           // ATUALIZA STATUS DA SALA PARA 'terminada'
           console.log(`[STOP->MATCH_END] Atualizando sala ${salaId} para 'terminada'`);
-          const { error: updateSalaStopError } = await supa
+          const { error: updateSalaStopError } = await supabaseAdmin
             .from('sala') //
             .update({ status: 'terminada' }) // Novo status
             .eq('sala_id', salaId); //
@@ -589,7 +607,7 @@ export function initSockets(httpServer) { //
         try { //
           // --- Verificar inventário e decrementar ---
           // Busca o item e o power-up associado para pegar o código
-          const { data: itemInventario, error: checkError } = await supa //
+          const { data: itemInventario, error: checkError } = await supabaseAdmin //
               .from('jogador_power_up') //
               .select(`
                   jogador_power_up_id,
@@ -606,7 +624,7 @@ export function initSockets(httpServer) { //
              return; //
           }
           const novaQuantidade = itemInventario.quantidade - 1; //
-          const { error: decrementError } = await supa //
+          const { error: decrementError } = await supabaseAdmin //
               .from('jogador_power_up') //
               .update({ quantidade: novaQuantidade }) //
               .eq('jogador_power_up_id', itemInventario.jogador_power_up_id); // Usa a chave primária da tabela de inventário
@@ -686,7 +704,7 @@ export function initSockets(httpServer) { //
                 }
                 
                 // Apaga as respostas do adversário no banco de dados para a rodada atual
-                const { error: clearError } = await supa
+                const { error: clearError } = await supabaseAdmin
                   .from('participacao_rodada')
                   .update({ resposta: '' })
                   .eq('rodada_id', currentRoundId)
@@ -723,7 +741,7 @@ export function initSockets(httpServer) { //
                 }
 
                 // Busca o nome do tema da rodada
-                const { data: temasRodada, error: temasError } = await supa
+                const { data: temasRodada, error: temasError } = await supabaseAdmin
                   .from('rodada_tema')
                   .select('tema:tema_id(tema_nome)')
                   .eq('rodada_id', currentRoundId);
@@ -771,7 +789,7 @@ export function initSockets(httpServer) { //
                   }
 
                   // Busca o nome do tema da rodada
-                  const { data: temasRodada, error: temasError } = await supa
+                  const { data: temasRodada, error: temasError } = await supabaseAdmin
                     .from('rodada_tema')
                     .select('tema:tema_id(tema_nome)')
                     .eq('rodada_id', currentRoundId);
@@ -792,7 +810,7 @@ export function initSockets(httpServer) { //
                   const targetSocketId = await getSocketIdByPlayerId(targetId);
                   if (targetSocketId) {
                     // Busca o tema_id para enviar ao frontend
-                    const { data: temasRodadaFull, error: temasErrFull } = await supa
+                    const { data: temasRodadaFull, error: temasErrFull } = await supabaseAdmin
                       .from('rodada_tema')
                       .select('tema_id, tema:tema_id(tema_nome)')
                       .eq('rodada_id', currentRoundId);
@@ -840,7 +858,7 @@ export function initSockets(httpServer) { //
         const jogadorId = socket.data.jogador_id; //
         if (salaId && jogadorId) {
            console.log(`[DISCONNECT] Removendo jogador ${jogadorId} da sala ${salaId} (se existir)...`);
-           supa.from('jogador_sala').delete().match({ sala_id: salaId, jogador_id: jogadorId })
+           supabaseAdmin.from('jogador_sala').delete().match({ sala_id: salaId, jogador_id: jogadorId })
              .then(({ error }) => {
                  if (error) {
                      console.error(`[DISCONNECT] Erro ao remover jogador ${jogadorId} da sala ${salaId}:`, error);
@@ -849,7 +867,7 @@ export function initSockets(httpServer) { //
                      // Emitir atualização de jogadores para a sala
                      const io = getIO();
                      if (io) {
-                        supa.from('jogador_sala')
+                        supabaseAdmin.from('jogador_sala')
                             .select('jogador:jogador_id(nome_de_usuario)')
                             .eq('sala_id', salaId)
                             .then(({ data: playersData, error: playersError }) => {

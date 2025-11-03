@@ -1,3 +1,4 @@
+// frontend/src/lib/api.js
 import axios from 'axios';
 
 export const api = axios.create({
@@ -5,24 +6,65 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// injeta Authorization: Bearer <token>
-api.interceptors.request.use(
-  (config) => {
-    // --- LOGS ADICIONADOS ---
-    console.log(`[API Interceptor] Interceptando request para: ${config.url}`);
-    const token = localStorage.getItem('token');
-    console.log(`[API Interceptor] Token lido do localStorage: ${token ? 'ENCONTRADO' : 'NÃO ENCONTRADO'}`);
-    // -------------------------
+// REQUEST: injeta Authorization
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-      console.log('[API Interceptor] Header Authorization DEFINIDO.'); // Log de sucesso
-    } else {
-      console.warn('[API Interceptor] Header Authorization NÃO definido (token ausente).'); // Log de aviso
+let isRefreshing = false
+let pending = []
+
+function onRefreshed(newToken) {
+  pending.forEach(cb => cb(newToken))
+  pending = []
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error.config
+    if (error.response?.status === 401 && !original.__isRetryRequest) {
+      const refresh = localStorage.getItem('refresh_token')
+      if (!refresh) return Promise.reject(error)
+
+      if (isRefreshing) {
+        // aguarda refresh em andamento
+        return new Promise((resolve) => {
+          pending.push((newToken) => {
+            original.headers.Authorization = `Bearer ${newToken}`
+            resolve(api(original))
+          })
+        })
+      }
+
+      try {
+        isRefreshing = true
+        const { data } = await api.post('/auth/refresh', { refresh_token: refresh })
+        const newToken = data.access_token
+        const newRefresh = data.refresh_token
+
+        if (newToken) localStorage.setItem('token', newToken)
+        if (newRefresh) localStorage.setItem('refresh_token', newRefresh)
+
+        isRefreshing = false
+        onRefreshed(newToken)
+
+        original.__isRetryRequest = true
+        original.headers.Authorization = `Bearer ${newToken}`
+        return api(original)
+      } catch (e) {
+        isRefreshing = false
+        // logout básico
+        localStorage.removeItem('token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('meuJogadorId')
+        return Promise.reject(e)
+      }
     }
-    return config;
-  },
-  (error) => Promise.reject(error),
-);
+    return Promise.reject(error)
+  }
+)
 
-export default api;
+export default api

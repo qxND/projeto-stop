@@ -8,7 +8,7 @@ function normalize(str) {
 
 export async function scoreRound(roundId) {
   // pega rodada + letra
-  const { data: round, error: eRound } = await supa
+  const { data: round, error: eRound } = await supabaseAdmin
     .from('rodada')
     .select('rodada_id, sala_id, numero_da_rodada, letra:letra_id(letra_caractere)')
     .eq('rodada_id', roundId).single()
@@ -16,14 +16,14 @@ export async function scoreRound(roundId) {
   const letra = round.letra.letra_caractere?.toUpperCase()
 
   // jogadores da sala
-  const { data: jogadoresSala } = await supa
+  const { data: jogadoresSala } = await supabaseAdmin
     .from('jogador_sala')
     .select('jogador_id')
     .eq('sala_id', round.sala_id)
   const jogadores = (jogadoresSala || []).map(j => j.jogador_id)
 
   // 4 temas da rodada
-  const { data: temas, error: eTemas } = await supa
+  const { data: temas, error: eTemas } = await supabaseAdmin
     .from('rodada_tema')
     .select('tema:tema_id(tema_id, tema_nome)')
     .eq('rodada_id', roundId)
@@ -31,7 +31,7 @@ export async function scoreRound(roundId) {
   const temaList = temas.map(t => t.tema)
 
   // EXISTENTES
-  const { data: existentes } = await supa
+  const { data: existentes } = await supabaseAdmin
     .from('participacao_rodada')
     .select('participacao_id, jogador_id, tema_nome, resposta, pontos')
     .eq('rodada_id', roundId)
@@ -53,11 +53,11 @@ export async function scoreRound(roundId) {
     }
   }
   if (precisaInserir.length > 0) {
-    await supa.from('participacao_rodada').insert(precisaInserir)
+    await supabaseAdmin.from('participacao_rodada').insert(precisaInserir)
   }
 
   // Reconsulta já com placeholders
-  const { data: respostas, error: eResp2 } = await supa
+  const { data: respostas, error: eResp2 } = await supabaseAdmin
     .from('participacao_rodada')
     .select('participacao_id, jogador_id, tema_nome, resposta, pontos')
     .eq('rodada_id', roundId)
@@ -113,7 +113,7 @@ export async function scoreRound(roundId) {
 
   // aplica pontos
   for (const u of updates) {
-    await supa.from('participacao_rodada').update({ pontos: u.pontos }).eq('participacao_id', u.id)
+    await supabaseAdmin.from('participacao_rodada').update({ pontos: u.pontos }).eq('participacao_id', u.id)
   }
 
   return {

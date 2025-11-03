@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 
 import App from './App'
-import HomeScreen from './pages/Homescreen'
+import HomeScreen from './pages/HomeScreen'
 import LobbyScreen from './pages/LobbyScreen'
 import GameScreen from './pages/GameScreen'
 import ShopScreen from './pages/ShopScreen'

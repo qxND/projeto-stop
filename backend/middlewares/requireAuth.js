@@ -1,24 +1,40 @@
-// src/middlewares/requireAuth.js
-import jwt from 'jsonwebtoken';
+// backend/src/middlewares/requireAuth.js
 
-const JWT_SECRET = process.env.JWT_SECRET || 'developer_secret_key';
+import { supabaseAdmin } from '../services/supabase.js';
 
-export function requireAuth(req, res, next) {
-  console.log(`[requireAuth] Checking auth for: ${req.method} ${req.originalUrl}`); // <-- ADD THIS
+export async function requireAuth(req, res, next) {
   try {
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
-      console.log("[requireAuth] FAILED: Missing Authorization header"); // <-- ADD THIS
+    const auth = req.headers.authorization || '';
+    if (!auth.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing Authorization header' });
     }
     const token = auth.split(' ')[1];
-    console.log("[requireAuth] Token found:", token ? 'Yes' : 'No'); // <-- ADD THIS
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = { jogador_id: payload.sub };
-    console.log("[requireAuth] SUCCESS: User ID", req.user.jogador_id); // <-- ADD THIS
+
+    const { data, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !data?.user?.email) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    // Resolve jogador_id (numérico) pela sua tabela
+    const { data: jogador, error: jErr } = await supabaseAdmin
+      .from('jogador')
+      .select('jogador_id, nome_de_usuario, email')
+      .eq('email', data.user.email)
+      .maybeSingle();
+
+    if (jErr || !jogador) {
+      return res.status(401).json({ error: 'Perfil de jogador não encontrado' });
+    }
+
+    req.user = {
+      supabase_user_id: data.user.id,
+      email: data.user.email,
+      jogador_id: Number(jogador.jogador_id),
+      nome_de_usuario: jogador.nome_de_usuario
+    };
+
     next();
   } catch (e) {
-    console.log("[requireAuth] FAILED: Invalid token -", e.message); // <-- ADD THIS
     return res.status(401).json({ error: 'Invalid token', message: e.message });
   }
 }

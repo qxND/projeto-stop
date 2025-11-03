@@ -1,5 +1,5 @@
 // backend/services/game.js
-import { supa } from './supabase.js'
+import { supabaseAdmin } from './supabase.js'
 
 /* =========================
    Utilidades
@@ -21,7 +21,7 @@ export async function getJogadoresDaSala(salaId) {
   const sId = Number(salaId)
 
   // A) fonte canônica
-  const js = await supa
+  const js = await supabaseAdmin
     .from('jogador_sala')
     .select('jogador_id')
     .eq('sala_id', sId)
@@ -37,7 +37,7 @@ export async function getJogadoresDaSala(salaId) {
 
 /** Core da rodada: sala + letra */
 async function getRoundCore(rodadaId) {
-  const r = await supa
+  const r = await supabaseAdmin
     .from('rodada')
     .select('rodada_id, sala_id, letra_id')
     .eq('rodada_id', rodadaId)
@@ -45,7 +45,7 @@ async function getRoundCore(rodadaId) {
   if (r.error) throw r.error
   if (!r.data) return null
 
-  const qLetra = await supa
+  const qLetra = await supabaseAdmin
     .from('letra')
     .select('letra_id, letra_caractere')
     .eq('letra_id', r.data.letra_id)
@@ -62,7 +62,7 @@ async function getRoundCore(rodadaId) {
 
 /** Temas (id+nome) associados à rodada */
 async function getRoundTemas(rodadaId) {
-  const q = await supa
+  const q = await supabaseAdmin
     .from('rodada_tema')
     .select('tema_id, tema:tema_id ( tema_nome )')
     .eq('rodada_id', rodadaId)
@@ -82,7 +82,7 @@ export async function buildRoundPayload(rodadaId) {
 }
 
 async function getTemasDaRodada(rodadaId) {
-  const { data, error } = await supa
+  const { data, error } = await supabaseAdmin
     .from('rodada_tema')
     .select(`
       rodada_id,
@@ -99,7 +99,7 @@ async function getTemasDaRodada(rodadaId) {
 }
 
 async function getRodadasFromSala(salaId) {
-  const { data, error } = await supa
+  const { data, error } = await supabaseAdmin
     .from('rodada')
     .select('rodada_id, numero_da_rodada')
     .eq('sala_id', salaId)
@@ -142,7 +142,7 @@ async function ensurePlaceholders({ rodadaId, jogadores, temas }) {
     }
   }
   if (!rows.length) return
-  const up = await supa
+  const up = await supabaseAdmin
     .from('participacao_rodada')
     .upsert(rows, {
       onConflict: 'rodada_id,jogador_id,tema_nome',
@@ -152,7 +152,7 @@ async function ensurePlaceholders({ rodadaId, jogadores, temas }) {
 }
 
 async function loadRespostasRodada({ rodadaId, jogadores, temas }) {
-  const { data, error } = await supa
+  const { data, error } = await supabaseAdmin
     .from('participacao_rodada')
     .select('jogador_id, tema_nome, resposta, pontos')
     .eq('rodada_id', rodadaId)
@@ -168,7 +168,7 @@ async function loadRespostasRodada({ rodadaId, jogadores, temas }) {
 }
 
 async function savePontuacao({ rodadaId, temaNome, jogadorId, pontos }) {
-  const { error } = await supa
+  const { error } = await supabaseAdmin
     .from('participacao_rodada')
     .update({ pontos })
     .eq('rodada_id', rodadaId)
@@ -178,7 +178,7 @@ async function savePontuacao({ rodadaId, temaNome, jogadorId, pontos }) {
 }
 
 async function computeTotaisSala({ salaId }) {
-  const qRounds = await supa
+  const qRounds = await supabaseAdmin
     .from('rodada')
     .select('rodada_id')
     .eq('sala_id', salaId)
@@ -186,7 +186,7 @@ async function computeTotaisSala({ salaId }) {
   const rodadaIds = (qRounds.data || []).map(r => r.rodada_id)
   if (!rodadaIds.length) return {}
 
-  const qPart = await supa
+  const qPart = await supabaseAdmin
     .from('participacao_rodada')
     .select('jogador_id, pontos, rodada_id')
     .in('rodada_id', rodadaIds)
@@ -207,7 +207,7 @@ async function loadLexiconMap({ temaIds, letraId }) {
   if (!temaIds || !temaIds.length) return {} // Adiciona verificação
   if (!letraId) return {}; // Adiciona verificação
 
-  const { data, error } = await supa
+  const { data, error } = await supabaseAdmin
     .from('resposta_base')
     .select('tema_id, texto')
     .eq('letra_id', letraId)
@@ -232,7 +232,7 @@ async function loadLexiconMap({ temaIds, letraId }) {
  */
 export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null, disregardedOpponentWordsSet = null }) {
   // 🔒 Tenta ganhar o "lock" para evitar pontuação dupla
-  const lock = await supa
+  const lock = await supabaseAdmin
     .from('rodada')
     .update({ status: 'scoring' })
     .eq('rodada_id', roundId)
@@ -252,7 +252,7 @@ export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null
   // Fallback: Se jogador_sala estiver vazio (ex: jogadores saíram?), pega quem participou
   if (!jogadores || jogadores.length === 0) {
     console.warn(`[endRoundAndScore] Nenhum jogador encontrado em jogador_sala para sala ${salaId}. Verificando participacao_rodada.`);
-    const q = await supa
+    const q = await supabaseAdmin
       .from('participacao_rodada')
       .select('jogador_id', { distinct: true }) // Pega IDs únicos
       .eq('rodada_id', roundId)
@@ -261,7 +261,7 @@ export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null
     if (jogadores.length === 0) {
         console.warn(`[endRoundAndScore] Nenhum jogador participou da rodada ${roundId}. Abortando pontuação.`);
         // Marca como done mesmo assim para não bloquear
-        await supa.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
+        await supabaseAdmin.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
         return { roundId, roundScore: {}, totais: {} }; // Retorna vazio
     }
   }
@@ -269,7 +269,7 @@ export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null
   const temas = await getTemasDaRodada(roundId) // [{rodada_id, tema_id, tema_nome}]
   if (!temas || temas.length === 0) {
       console.warn(`[endRoundAndScore] Rodada ${roundId} não tem temas associados. Abortando pontuação.`);
-      await supa.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
+      await supabaseAdmin.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
       return { roundId, roundScore: {}, totais: await computeTotaisSala({ salaId }) };
   }
   
@@ -284,7 +284,7 @@ export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null
   if (!core) { // Segurança extra
       console.error(`[endRoundAndScore] Falha ao carregar core da rodada ${roundId}.`);
       // Não reverter o status 'scoring' aqui, marcar como done
-      await supa.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
+      await supabaseAdmin.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
       return { roundId, roundScore: {}, totais: await computeTotaisSala({ salaId }) };
   }
   const letraId = core.letra_id
@@ -374,7 +374,7 @@ export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null
   const totais = await computeTotaisSala({ salaId })
 
   // ✅ Marca a rodada como concluída no banco de dados
-  await supa.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId)
+  await supabaseAdmin.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId)
 
   // Retorna o resultado da rodada e os totais
   return { roundId, roundScore, totais }
@@ -386,7 +386,7 @@ export async function getRoundResults({ salaId, roundId }) {
     // Busca os jogadores da sala
     let jogadores = await getJogadoresDaSala(salaId);
     if (!jogadores || jogadores.length === 0) {
-      const q = await supa
+      const q = await supabaseAdmin
         .from('participacao_rodada')
         .select('jogador_id', { distinct: true })
         .eq('rodada_id', roundId);
@@ -401,7 +401,7 @@ export async function getRoundResults({ salaId, roundId }) {
     }
 
     // Busca os resultados pontuados do banco
-    const { data: participacoes, error } = await supa
+    const { data: participacoes, error } = await supabaseAdmin
       .from('participacao_rodada')
       .select('jogador_id, tema_nome, pontos')
       .eq('rodada_id', roundId)
@@ -438,9 +438,9 @@ export async function generateCoherentRounds({ totalRounds = 5 }) {
   // 1) Carrega toda a resposta_base (paginando para evitar limites)
   let allRows = []
   let from = 0
-  const pageSize = 1000 // Limite padrão do Supabase
+  const pageSize = 1000 // Limite padrão do supabaseAdminbase
   while (true) {
-    const { data, error } = await supa
+    const { data, error } = await supabaseAdmin
       .from('resposta_base')
       .select('tema_id, letra_id')
       .range(from, from + pageSize - 1)
@@ -482,13 +482,13 @@ export async function generateCoherentRounds({ totalRounds = 5 }) {
   const letrasEscolhidas = pool.slice(0, totalRounds) // Pega as primeiras 'totalRounds' letras embaralhadas
 
   // 5) Busca nomes das letras e temas para usar no payload final
-  const { data: letrasTbl, error: eL } = await supa
+  const { data: letrasTbl, error: eL } = await supabaseAdmin
     .from('letra')
     .select('letra_id, letra_caractere')
     .in('letra_id', letrasEscolhidas) // Otimiza buscando só as letras escolhidas
   if (eL) throw eL
 
-  const { data: temasTbl, error: eT } = await supa
+  const { data: temasTbl, error: eT } = await supabaseAdmin
     .from('tema')
     .select('tema_id, tema_nome')
     // Busca todos os temas, pois precisaremos deles para mapear os IDs sorteados

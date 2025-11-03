@@ -1,6 +1,6 @@
 // backend/routes/matches.js
 import { Router } from 'express';
-import { supa } from '../services/supabase.js';
+import { supabaseAdmin } from '../services/supabase.js';
 import { getIO, scheduleRoundCountdown } from '../src/sockets.js';
 import { buildRoundPayload, generateCoherentRounds } from '../services/game.js';
 
@@ -8,7 +8,7 @@ const router = Router();
 
 // helper: garante tempo_id para uma duração
 async function ensureTempoId(durationSeconds) {
-  let { data, error } = await supa
+  let { data, error } = await supabaseAdmin
     .from('tempo')
     .select('tempo_id, valor')
     .eq('valor', durationSeconds)
@@ -16,7 +16,7 @@ async function ensureTempoId(durationSeconds) {
   if (error) throw error;
   if (data) return data.tempo_id;
 
-  const ins = await supa
+  const ins = await supabaseAdmin
     .from('tempo')
     .insert({ valor: durationSeconds })
     .select('tempo_id')
@@ -34,7 +34,7 @@ router.post('/start', async (req, res) => {
     const DURATION = Number(req.body.duration || 20);
 
     // 1) Reutiliza rodadas existentes (ready/in_progress) se houver
-    const qExisting = await supa
+    const qExisting = await supabaseAdmin
       .from('rodada')
       .select('rodada_id, numero_da_rodada, status')
       .eq('sala_id', sala_id)
@@ -50,7 +50,7 @@ router.post('/start', async (req, res) => {
         const payload = await buildRoundPayload(first.rodada_id);
 
         // ATUALIZA O STATUS DA SALA ANTES DE INICIAR A RODADA
-        const { error: updateSalaError } = await supa
+        const { error: updateSalaError } = await supabaseAdmin
           .from('sala')
           .update({ status: 'in_progress' }) // Ou o status que indica jogo ativo
           .eq('sala_id', sala_id);
@@ -60,7 +60,7 @@ router.post('/start', async (req, res) => {
         }
 
         // marca como in_progress antes de começar
-        await supa
+        await supabaseAdmin
           .from('rodada')
           .update({ status: 'in_progress' })
           .eq('rodada_id', payload.rodada_id);
@@ -73,7 +73,7 @@ router.post('/start', async (req, res) => {
     }
 
     // 2) Precisa de pelo menos 2 jogadores na sala
-    const qPlayersJS = await supa.from('jogador_sala').select('jogador_id').eq('sala_id', sala_id);
+    const qPlayersJS = await supabaseAdmin.from('jogador_sala').select('jogador_id').eq('sala_id', sala_id);
 
     const ids = (qPlayersJS.data || []).map(r => Number(r.jogador_id));
     const unique = [...new Set(ids)].filter(Boolean);
@@ -103,7 +103,7 @@ router.post('/start', async (req, res) => {
     for (let i = 0; i < Math.min(roundsInfo.length, ROUNDS); i++) {
       const { letra_id, letra_char, temas } = roundsInfo[i];
 
-      const ins = await supa
+      const ins = await supabaseAdmin
         .from('rodada')
         .insert({
           sala_id,
@@ -122,7 +122,7 @@ router.post('/start', async (req, res) => {
         rodada_id,
         tema_id: t.tema_id
       }));
-      const insTema = await supa.from('rodada_tema').insert(payloadTema);
+      const insTema = await supabaseAdmin.from('rodada_tema').insert(payloadTema);
       if (insTema.error) throw insTema.error;
 
       created.push({
@@ -137,7 +137,7 @@ router.post('/start', async (req, res) => {
     const io = getIO();
     if (io && created.length) {
       // ATUALIZA O STATUS DA SALA ANTES DE INICIAR A RODADA
-      const { error: updateSalaError } = await supa
+      const { error: updateSalaError } = await supabaseAdmin
         .from('sala')
         .update({ status: 'in_progress' }) // Ou o status que indica jogo ativo
         .eq('sala_id', sala_id);
@@ -147,7 +147,7 @@ router.post('/start', async (req, res) => {
       }
 
       // Atualiza status da RODADA
-      await supa
+      await supabaseAdmin
         .from('rodada')
         .update({ status: 'in_progress' })
         .eq('rodada_id', created[0].rodada_id);
