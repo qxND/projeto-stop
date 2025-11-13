@@ -10,10 +10,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'developer_secret_key'; //
 const sleep = (ms) => new Promise(r => setTimeout(r, ms)); //
 const GRACE_MS = 3000; //
 
-const MOEDAS_VITORIA = 50; //
-const MOEDAS_EMPATE = 25; //
-const MOEDAS_PARTICIPACAO = 5; //
-
 let io; //
 
 // ===== Armazenamento em Memória para Power-ups Ativos na Rodada =====
@@ -154,39 +150,6 @@ function alreadyScored(salaId, roundId) {
     return false; //
 }
 
-// Função para adicionar moedas a um jogador
-async function adicionarMoedas(jogadorId, quantidade) {
-    if (!jogadorId || quantidade <= 0) return; //
-    try {
-      console.log(`[MOEDAS] Adicionando ${quantidade} moedas para jogador ${jogadorId}...`);
-      // Usando rpc para chamar uma função SQL 'adicionar_moedas' (mais seguro contra race conditions)
-      // Você precisará criar essa função no Supabase SQL Editor:
-      /*
-      CREATE OR REPLACE FUNCTION adicionar_moedas(jogador_id_param int, quantidade_param int)
-      RETURNS void AS $$
-      BEGIN
-        UPDATE public.jogador
-        SET moedas = COALESCE(moedas, 0) + quantidade_param
-        WHERE jogador_id = jogador_id_param;
-      END;
-      $$ LANGUAGE plpgsql;
-      */
-      const { error } = await supa.rpc('adicionar_moedas', {
-          jogador_id_param: jogadorId,
-          quantidade_param: quantidade
-      });
-      if (error) throw error;
-      console.log(`[MOEDAS] ${quantidade} moedas adicionadas para jogador ${jogadorId}.`);
-
-      // Opcional: Notificar o jogador sobre o ganho de moedas via socket?
-      // const socketId = await getSocketIdByPlayerId(jogadorId);
-      // if (socketId) io.to(socketId).emit('player:coins_updated', { /* novo saldo? */ });
-
-    } catch(e) {
-        console.error(`[MOEDAS] Erro ao adicionar ${quantidade} moedas para jogador ${jogadorId}:`, e.message);
-    }
-}
-
 // Função auxiliar para obter ID de socket por jogador_id
 async function getSocketIdByPlayerId(targetPlayerId) { //
     if (!io) return null; // Garante que io existe
@@ -300,7 +263,7 @@ export function scheduleRoundCountdown({ salaId, roundId, duration = 20 }) { //
         // *** O 'payload' agora contém 'roundDetails' ***
         io.to(salaId).emit('round:end', payload); // Emite o resultado NORMALMENTE
 
-        const next = await getNextRoundForSala({ salaId, afterRoundId: roundId }); //
+         const next = await getNextRoundForSala({ salaId, afterRoundId: roundId }); //
         if (next) { //
             // Aguarda 10 segundos antes de iniciar a próxima rodada
             console.log(`[TIMER->NEXT_ROUND] Aguardando 10 segundos antes de iniciar próxima rodada ${next.rodada_id} para sala ${salaId}`);
@@ -319,55 +282,42 @@ export function scheduleRoundCountdown({ salaId, roundId, duration = 20 }) { //
                 setTimeout(() => {
                   const timeLeft = getTimeLeftForSala(salaId, duration);
                   io.to(salaId).emit('round:ready', next); //
-                  io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration, timeLeft: timeLeft }); // Usar a mesma duração
+                  io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration, timeLeft: timeLeft }); //
                 }, 100);
                 setTimeout(() => {
                   const timeLeft = getTimeLeftForSala(salaId, duration);
                   io.to(salaId).emit('round:ready', next); //
-                  io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration, timeLeft: timeLeft }); // Usar a mesma duração
+                  io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration, timeLeft: timeLeft }); //
                 }, 500);
                 scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration }); //
-            }, 10000); // Delay de 10 segundos (10000ms)
-        } else { //
-          // --- LÓGICA DE FIM DE PARTIDA E MOEDAS (TIMER) ---
-          const winnerInfo = computeWinner(payload.totais); //
-          const todosJogadoresIds = Object.keys(payload.totais || {}).map(Number); //
-
-          // Adicionar Moedas pela participação/vitória/empate
-          for (const jId of todosJogadoresIds) {
-              let moedasGanhas = MOEDAS_PARTICIPACAO; //
-              if (winnerInfo?.empate && winnerInfo.jogadores.includes(jId)) { //
-                  moedasGanhas += MOEDAS_EMPATE; //
-              } else if (!winnerInfo?.empate && winnerInfo?.jogador_id === jId) { //
-                  moedasGanhas += MOEDAS_VITORIA; //
-              }
-              await adicionarMoedas(jId, moedasGanhas); //
-          }
-
-          // ATUALIZA STATUS DA SALA PARA 'terminada'
+            }, 10000);
+        } else {
+          // === FIM DEFINITIVO DA PARTIDA (TIMER) ===
+          const winnerInfo = computeWinner(payload.totais);
+          
           console.log(`[TIMER->MATCH_END] Atualizando sala ${salaId} para 'terminada'`);
           const { error: updateSalaError } = await supa
-            .from('sala') //
-            .update({ status: 'terminada' }) // Novo status
-            .eq('sala_id', salaId); //
+            .from('sala')
+            .update({ status: 'terminada' })
+            .eq('sala_id', salaId);
           if (updateSalaError) {
               console.error(`[TIMER] Erro ao atualizar status da sala ${salaId} para terminada:`, updateSalaError);
           }
 
-          // Salva ranking da partida
           try {
               await saveRanking({ salaId, totais: payload.totais, winnerInfo });
           } catch (rankingError) {
               console.error(`[TIMER->MATCH_END] Erro ao salvar ranking para sala ${salaId}:`, rankingError);
           }
 
-          io.to(salaId).emit('match:end', { //
-                totais: payload.totais, // Envia totais
-                vencedor: winnerInfo // Envia info do vencedor
+          io.to(salaId).emit('match:end', {
+              totais: payload.totais,
+              vencedor: winnerInfo
           });
-          console.log(`[TIMER->MATCH_END] Fim de partida para sala ${salaId}`); // Log de fim de partida
-          // ----------------------------------------------------
+          console.log(`[TIMER->MATCH_END] Fim de partida para sala ${salaId}`);
         }
+
+
       } catch (e) {
          console.error(`[TIMER ${salaId} ${roundId}] Error during countdown end:`, e);
          io.to(salaId).emit('app:error', { context: 'timer-end', message: e.message }); //
@@ -470,44 +420,74 @@ export function initSockets(httpServer) { //
         await sleep(GRACE_MS); //
 
         // Re-verifica se pontuou durante o sleep (caso MUITO raro de concorrência extrema)
-         if (scoredRounds.has(`${salaId}-${roundId}`)) {
-             console.warn(`[STOP] Rodada ${roundId} já foi pontuada durante GRACE_MS (concorrência?). Buscando resultados existentes.`);
-             // Busca os resultados já calculados e os envia mesmo assim
-             // *** MODIFICADO PELO PASSO 4: `getRoundResults` agora retorna `roundDetails` ***
-             const payload = await getRoundResults({ salaId, roundId });
-             io.to(salaId).emit('round:end', payload);
-             
-             // Continua com a lógica de próxima rodada
-             const next = await getNextRoundForSala({ salaId, afterRoundId: roundId });
-             if (next) {
-                 // Aguarda 10 segundos antes de iniciar a próxima rodada
-                 console.log(`[STOP->NEXT_ROUND] Aguardando 10 segundos antes de iniciar próxima rodada ${next.rodada_id} para sala ${salaId}`);
-                 setTimeout(async () => {
-                     const nextCheck = await getNextRoundForSala({ salaId, afterRoundId: roundId });
-                     if (!nextCheck || nextCheck.rodada_id !== next.rodada_id) {
-                         console.log(`[STOP->NEXT_ROUND] Próxima rodada mudou durante o delay, abortando.`);
-                         return;
-                     }
-                     console.log(`[STOP->NEXT_ROUND] Iniciando próxima rodada ${next.rodada_id} para sala ${salaId}`);
-                     await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id);
-                     const qTempo = await supa.from('rodada').select('tempo:tempo_id(valor)').eq('rodada_id', roundId).single();
-                     const duration = qTempo.data?.tempo?.valor || 20;
-                     // Emite eventos múltiplas vezes para garantir que todos recebam
-                     setTimeout(() => {
-                       const timeLeft = getTimeLeftForSala(salaId, duration);
-                       io.to(salaId).emit('round:ready', next);
-                       io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration, timeLeft: timeLeft });
-                     }, 100);
-                     setTimeout(() => {
-                       const timeLeft = getTimeLeftForSala(salaId, duration);
-                       io.to(salaId).emit('round:ready', next);
-                       io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration: duration, timeLeft: timeLeft });
-                     }, 500);
-                     scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration });
-                 }, 10000);
-             }
-             return; // Retorna aqui para não processar novamente
-         }
+               // Re-verifica se pontuou durante o sleep (caso de concorrência: timer + STOP)
+        if (scoredRounds.has(`${salaId}-${roundId}`)) {
+            console.warn(`[STOP] Rodada ${roundId} já foi pontuada durante GRACE_MS (concorrência?). Buscando resultados existentes.`);
+            
+            // Busca os resultados já calculados e envia o placar da rodada
+            const payload = await getRoundResults({ salaId, roundId });
+            io.to(salaId).emit('round:end', payload);
+            
+            // Tenta ir para a próxima rodada...
+            const next = await getNextRoundForSala({ salaId, afterRoundId: roundId });
+            if (next) {
+                console.log(`[STOP->NEXT_ROUND] Aguardando 10 segundos antes de iniciar próxima rodada ${next.rodada_id} para sala ${salaId}`);
+                setTimeout(async () => {
+                    const nextCheck = await getNextRoundForSala({ salaId, afterRoundId: roundId });
+                    if (!nextCheck || nextCheck.rodada_id !== next.rodada_id) {
+                        console.log(`[STOP->NEXT_ROUND] Próxima rodada mudou durante o delay, abortando.`);
+                        return;
+                    }
+                    console.log(`[STOP->NEXT_ROUND] Iniciando próxima rodada ${next.rodada_id} para sala ${salaId}`);
+                    await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', next.rodada_id);
+                    const qTempo = await supa
+                      .from('rodada')
+                      .select('tempo:tempo_id(valor)')
+                      .eq('rodada_id', roundId)
+                      .single();
+                    const duration = qTempo.data?.tempo?.valor || 20;
+
+                    setTimeout(() => {
+                      const timeLeft = getTimeLeftForSala(salaId, duration);
+                      io.to(salaId).emit('round:ready', next);
+                      io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration, timeLeft });
+                    }, 100);
+                    setTimeout(() => {
+                      const timeLeft = getTimeLeftForSala(salaId, duration);
+                      io.to(salaId).emit('round:ready', next);
+                      io.to(salaId).emit('round:started', { roundId: next.rodada_id, duration, timeLeft });
+                    }, 500);
+                    scheduleRoundCountdown({ salaId, roundId: next.rodada_id, duration });
+                }, 10000);
+            } else {
+                // === NÃO HÁ PRÓXIMA RODADA → FIM DEFINITIVO DA PARTIDA (FLUXO STOP) ===
+                const winnerInfo = computeWinner(payload.totais);
+
+                console.log(`[STOP->MATCH_END] Atualizando sala ${salaId} para 'terminada' (fluxo concorrente)`);
+                const { error: updateSalaStopError } = await supa
+                  .from('sala')
+                  .update({ status: 'terminada' })
+                  .eq('sala_id', salaId);
+                if (updateSalaStopError) {
+                    console.error(`[STOP] Erro ao atualizar status da sala ${salaId} para terminada:`, updateSalaStopError);
+                }
+
+                try {
+                    await saveRanking({ salaId, totais: payload.totais, winnerInfo });
+                } catch (rankingError) {
+                    console.error(`[STOP->MATCH_END] Erro ao salvar ranking para sala ${salaId}:`, rankingError);
+                }
+
+                io.to(salaId).emit('match:end', {
+                    totais: payload.totais,
+                    vencedor: winnerInfo
+                });
+                console.log(`[STOP->MATCH_END] Fim de partida para sala ${salaId} (fluxo concorrente)`);
+            }
+
+            return; // Não processa mais nada desta chamada
+        }
+
 
         // *** MODIFICADO PELO PASSO 4: `endRoundAndScore` agora retorna `roundDetails` ***
         const payload = await endRoundAndScore({ 
@@ -598,44 +578,33 @@ export function initSockets(httpServer) { //
                 scheduleRoundCountdown({ salaId: salaId, roundId: next.rodada_id, duration: duration }); //
             }, 10000); // Delay de 10 segundos (10000ms)
         } else { //
-          // --- LÓGICA DE FIM DE PARTIDA E MOEDAS (STOP) ---
-          const winnerInfo = computeWinner(payload.totais); //
-          const todosJogadoresIds = Object.keys(payload.totais || {}).map(Number); //
-          // Adicionar Moedas
-          for (const jId of todosJogadoresIds) {
-              let moedasGanhas = MOEDAS_PARTICIPACAO; //
-              if (winnerInfo?.empate && winnerInfo.jogadores.includes(jId)) { //
-                  moedasGanhas += MOEDAS_EMPATE; //
-              } else if (!winnerInfo?.empate && winnerInfo?.jogador_id === jId) { //
-                  moedasGanhas += MOEDAS_VITORIA; //
-              }
-              await adicionarMoedas(jId, moedasGanhas); //
-          }
+  // --- FIM DE PARTIDA (STOP) SEM MOEDAS ---
+  const winnerInfo = computeWinner(payload.totais); //
 
-          // ATUALIZA STATUS DA SALA PARA 'terminada'
-          console.log(`[STOP->MATCH_END] Atualizando sala ${salaId} para 'terminada'`);
-          const { error: updateSalaStopError } = await supa
-            .from('sala') //
-            .update({ status: 'terminada' }) // Novo status
-            .eq('sala_id', salaId); //
-          if (updateSalaStopError) {
-               console.error(`[STOP] Erro ao atualizar status da sala ${salaId} para terminada:`, updateSalaStopError);
-          }
+  console.log(`[STOP->MATCH_END] Atualizando sala ${salaId} para 'terminada'`);
+  const { error: updateSalaStopError } = await supa
+    .from('sala')
+    .update({ status: 'terminada' })
+    .eq('sala_id', salaId);
 
-          // Salva ranking da partida
-          try {
-              await saveRanking({ salaId, totais: payload.totais, winnerInfo });
-          } catch (rankingError) {
-              console.error(`[STOP->MATCH_END] Erro ao salvar ranking para sala ${salaId}:`, rankingError);
-          }
+  if (updateSalaStopError) {
+    console.error(`[STOP] Erro ao atualizar status da sala ${salaId} para terminada:`, updateSalaStopError);
+  }
 
-          io.to(salaId).emit('match:end', { //
-                 totais: payload.totais, //
-                 vencedor: winnerInfo //
-          });
-          console.log(`[STOP->MATCH_END] Fim de partida para sala ${salaId}`); // Log de fim de partida
-          // --------------------------------------------------
-        }
+  try {
+    await saveRanking({ salaId, totais: payload.totais, winnerInfo });
+  } catch (rankingError) {
+    console.error(`[STOP->MATCH_END] Erro ao salvar ranking para sala ${salaId}:`, rankingError);
+  }
+
+  io.to(salaId).emit('match:end', {
+    totais: payload.totais,
+    vencedor: winnerInfo
+  });
+
+  console.log(`[STOP->MATCH_END] Fim de partida para sala ${salaId}`);
+}
+
       } catch (e) {
           console.error(`[STOP ${salaId} ${roundId}] Error during stop handling:`, e);
           io.to(salaId).emit('app:error', { context: 'stop-handler', message: e.message }); //

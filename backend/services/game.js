@@ -1,5 +1,7 @@
 // backend/services/game.js
 import { supa } from './supabase.js'
+import { getIO, scheduleRoundCountdown, getTimeLeftForSala } from '../src/sockets.js'; // ⬅️ ADICIONE
+import { saveRanking } from './ranking.js'; // se você usa o saveRanking no fim
 
 /* =========================
    Utilidades
@@ -566,4 +568,110 @@ export function pickLettersNoRepeat({ total, blacklist = [] }) {
     ;[A[i], A[j]] = [A[j], A[i]]
   }
   return A.slice(0, total)
+}
+
+// helpers para decidir próximo passo
+async function getNextReadyRoundId(sala_id) {
+  const { data, error } = await supa
+    .from('rodada')
+    .select('rodada_id, numero_da_rodada, status')
+    .eq('sala_id', sala_id)
+    .eq('status', 'ready')
+    .order('numero_da_rodada', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.rodada_id || null;
+}
+
+async function computeFinalScoreboard(sala_id) {
+  // Se você já tem uma função RPC de apuração, chame-a aqui.
+  // Caso contrário, um exemplo simples (ajuste para sua regra de pontos):
+  const { data, error } = await supa
+    .from('participacao_rodada')
+    .select('jogador_id, pontos')
+    .in('rodada_id',
+      (await supa.from('rodada').select('rodada_id').eq('sala_id', sala_id)).data.map(r => r.rodada_id)
+    );
+  if (error) throw error;
+
+  const totalPorJogador = {};
+  for (const r of (data || [])) {
+    totalPorJogador[r.jogador_id] = (totalPorJogador[r.jogador_id] || 0) + (r.pontos || 0);
+  }
+
+  // Ordena e marca vencedor
+  const ranking = Object.entries(totalPorJogador)
+    .map(([jogador_id, pontuacao_total]) => ({ jogador_id: Number(jogador_id), pontuacao_total }))
+    .sort((a, b) => b.pontuacao_total - a.pontuacao_total);
+
+  const vencedorId = ranking[0]?.jogador_id ?? null;
+
+  // (Opcional) persiste em public.ranking
+  if (ranking.length) {
+    const payload = ranking.map(r => ({
+      jogador_id: r.jogador_id,
+      sala_id,
+      pontuacao_total: r.pontuacao_total,
+      vencedor: r.jogador_id === vencedorId
+    }));
+    await supa.from('ranking').insert(payload);
+  }
+
+  return { ranking, vencedorId };
+}
+
+async function finishMatch(sala_id) {
+  // Marca todas as rodadas restantes como 'done'
+  await supa.from('rodada')
+    .update({ status: 'done', data_hora_fechamento: new Date().toISOString() })
+    .eq('sala_id', sala_id)
+    .neq('status', 'done');
+
+  // Fecha a sala
+  await supa.from('sala')
+    .update({ status: 'finished', data_hora_fechamento: new Date().toISOString() })
+    .eq('sala_id', sala_id);
+
+  // Monta placar final (ou chame sua RPC)
+  const scoreboard = await computeFinalScoreboard(sala_id);
+
+  const io = getIO();
+  if (io) {
+    io.to(String(sala_id)).emit('match:finished', { salaId: sala_id, ...scoreboard });
+  }
+
+  return scoreboard;
+}
+
+export async function startNextOrFinish({ sala_id, duration }) {
+  const nextId = await getNextReadyRoundId(sala_id);
+  if (!nextId) {
+    // acabou de vez
+    return await finishMatch(sala_id);
+  }
+
+  // há próxima rodada → inicia-la
+  await supa.from('rodada').update({ status: 'in_progress' }).eq('rodada_id', nextId);
+
+  const io = getIO();
+  if (io) {
+    const payload = await buildRoundPayload(nextId);
+    // (re)emissões com fallback, como você já faz:
+    setTimeout(() => {
+      const timeLeft = getTimeLeftForSala(sala_id, duration);
+      io.to(String(sala_id)).emit('round:ready', payload);
+      io.to(String(sala_id)).emit('round:started', { roundId: payload.rodada_id, duration, timeLeft });
+    }, 100);
+
+    setTimeout(() => {
+      const timeLeft = getTimeLeftForSala(sala_id, duration);
+      io.to(String(sala_id)).emit('round:ready', payload);
+      io.to(String(sala_id)).emit('round:started', { roundId: payload.rodada_id, duration, timeLeft });
+    }, 500);
+
+    scheduleRoundCountdown({ salaId: sala_id, roundId: payload.rodada_id, duration });
+  }
+
+  return { startedNext: true, nextRoundId: nextId };
 }
