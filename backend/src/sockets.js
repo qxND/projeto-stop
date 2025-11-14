@@ -425,6 +425,31 @@ export function initSockets(httpServer) { //
         socket.data.salaId = salaId; //
         // Confirma que entrou (opcional)
         socket.emit('joined', { salaId }); //
+
+          // === REAÇÕES DE EMOJI NO FIM DA RODADA ===
+  socket.on('player:react', ({ salaId, emojiId }) => {
+    try {
+      const fromPlayerId = socket.data.jogador_id;
+      const roomId = String(salaId || socket.data.salaId);
+
+      if (!roomId || !fromPlayerId || !emojiId) {
+        console.warn('[player:react] Dados incompletos:', { roomId, fromPlayerId, emojiId });
+        return;
+      }
+
+      console.log(`[player:react] jogador ${fromPlayerId} reagiu com "${emojiId}" na sala ${roomId}`);
+
+      // Broadcast para todo mundo na sala (inclusive quem reagiu)
+      io.to(roomId).emit('player:reacted', {
+        fromPlayerId,
+        emojiId,
+      });
+    } catch (e) {
+      console.error('[player:react] Erro ao processar reação:', e);
+    }
+  });
+  // === FIM REAÇÕES DE EMOJI ===
+
     });
 
     socket.on('round:stop', async ({ salaId, roundId, by }) => {
@@ -582,6 +607,9 @@ export function initSockets(httpServer) { //
     // Limpa SKIPs da rodada
     clearSkippedWords(salaId, roundId);
     clearDisregardedOpponentWords(salaId, roundId);
+
+    // envia resultado da rodada para TODOS da sala
+    io.to(salaId).emit('round:end', payload);
 
     // --- LÓGICA DE REVELAÇÃO (mantida igual) ---
     const revealRequesters = getAndClearRevealRequests(salaId, roundId);

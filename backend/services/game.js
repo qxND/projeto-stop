@@ -213,7 +213,8 @@ async function loadLexiconMap({ temaIds, letraId }) {
     .select('tema_id, texto')
     .eq('letra_id', letraId)
     .in('tema_id', temaIds)
-  if (error) throw error
+  
+    if (error) throw error
 
   const map = {}
   for (const row of data || []) {
@@ -296,103 +297,104 @@ export async function endRoundAndScore({ salaId, roundId, skippedWordsSet = null
   const letraNorm = normalize(letraChar); // Normaliza a letra da rodada uma vez
 
   // Carrega o dicionário de respostas válidas para esta letra e temas
-  const temaIds = temas.map(t => t.tema_id)
-  const lexicon = await loadLexiconMap({ temaIds, letraId })
+  const temaIds = temas.map(t => t.tema_id);
+  const lexicon = await loadLexiconMap({ temaIds, letraId });
 
-  // *** MODIFICADO: Renomeado roundScore para roundDetails ***
-  const roundDetails = {} // Objeto para guardar o placar detalhado desta rodada { tema_nome: { jogador_id: { resposta, pontos } } }
-  const allJogadorIds = [...jogadores] // Lista de IDs de todos os jogadores na sala/participantes
+  const roundDetails = {};
+  const allJogadorIds = [...jogadores];
 
   // Itera sobre cada tema da rodada
   for (const t of temas) {
-    const temaId = t.tema_id
-    const temaNome = t.tema_nome
-    const set = lexicon[temaId] || new Set() // Dicionário para este tema/letra
+    const temaId = t.tema_id;
+    const temaNome = t.tema_nome;
+    const set = lexicon[temaId] || new Set(); // dicionário só para esse tema/letra
 
-    const temaRespostas = {} // { jogador_id: { resposta, norm, valida, pontos } }
-    const validos = {} // { resposta_normalizada: [jogador_id1, jogador_id2] } -> Agrupa quem deu a mesma resposta válida
+    const temaRespostas = {}; // { jogador_id: { resposta, norm, valida, pontos } }
+    const validos = {};       // { resposta_normalizada: [jogador_id1, jogador_id2...] }
 
     // 1. Coleta e valida as respostas de TODOS os jogadores para este tema
     for (const jId of allJogadorIds) {
-      const resposta = respostas[temaNome]?.[jId]?.resposta || '' // Pega a resposta do mapa carregado
-      const norm = normalize(resposta) // Normaliza a resposta
-      const startsWith = letraNorm ? norm.startsWith(letraNorm) : false // Verifica se começa com a letra (normalizada)
-      const valida = !!norm && startsWith && set.has(norm) // É válida se não for vazia, começar certo e existir no dicionário
+      const resposta = respostas[temaNome]?.[jId]?.resposta || '';
+      const norm = normalize(resposta);          // normaliza (minúsculo, sem acento)
+      const startsWith = letraNorm
+        ? norm.startsWith(letraNorm)
+        : false;
 
-      // Armazena informações processadas
-      temaRespostas[jId] = { resposta, norm, valida, pontos: 0 }
+      // *** REGRAS QUE VOCÊ QUER ***
+      // - tem que ter texto
+      // - tem que começar com a letra da rodada
+      // - tem que existir no dicionário resposta_base (set.has(norm))
+      const valida = !!norm && startsWith && set.has(norm);
 
-      // Se a resposta for válida, adiciona ao grupo 'validos'
+      temaRespostas[jId] = { resposta, norm, valida, pontos: 0 };
+
       if (valida) {
-        if (!validos[norm]) validos[norm] = []
-        validos[norm].push(jId)
+        if (!validos[norm]) validos[norm] = [];
+        validos[norm].push(jId);
       }
     }
 
-    // 2. Calcula os pontos com base nas respostas válidas agrupadas
+    // 2. Pontuação: 10 única, 5 repetida, 0 inválida
     for (const norm in validos) {
-      const jogadoresComEstaResposta = validos[norm]
+      const jogadoresComEstaResposta = validos[norm];
+
       if (jogadoresComEstaResposta.length === 1) {
-        // Se SÓ UM jogador deu esta resposta válida -> 10 pontos
-        const jId = jogadoresComEstaResposta[0]
-        // Verifica se a palavra deste jogador foi desconsiderada
-        const isDisregarded = disregardedOpponentWordsSet && disregardedOpponentWordsSet.has(`${jId}-${temaNome}`)
+        const jId = jogadoresComEstaResposta[0];
+        const isDisregarded =
+          disregardedOpponentWordsSet &&
+          disregardedOpponentWordsSet.has(`${jId}-${temaNome}`);
         if (!isDisregarded) {
-          temaRespostas[jId].pontos = 10
+          temaRespostas[jId].pontos = 10;
         }
       } else {
-        // Se MAIS DE UM jogador deu esta resposta válida -> 5 pontos para cada um
         for (const jId of jogadoresComEstaResposta) {
-          // Verifica se a palavra deste jogador foi desconsiderada
-          const isDisregarded = disregardedOpponentWordsSet && disregardedOpponentWordsSet.has(`${jId}-${temaNome}`)
+          const isDisregarded =
+            disregardedOpponentWordsSet &&
+            disregardedOpponentWordsSet.has(`${jId}-${temaNome}`);
           if (!isDisregarded) {
-            temaRespostas[jId].pontos = 5
+            temaRespostas[jId].pontos = 5;
           }
         }
       }
     }
 
-    // 2.5. Aplica pontos para palavras puladas (SKIP_WORD powerup)
+    // 2.5. Powerup SKIP_WORD (se você estiver usando)
     if (skippedWordsSet && skippedWordsSet.size > 0) {
       for (const jId of allJogadorIds) {
-        const skipKey = `${jId}-${temaNome}`
+        const skipKey = `${jId}-${temaNome}`;
         if (skippedWordsSet.has(skipKey) && temaRespostas[jId].pontos === 0) {
-          // Se a palavra foi pulada e o jogador não ganhou pontos pela resposta normal, dá 10 pontos
-          temaRespostas[jId].pontos = 10
-          console.log(`[SKIP_WORD] Jogador ${jId} ganhou 10 pontos por pular palavra "${temaNome}"`)
+          temaRespostas[jId].pontos = 10;
+          console.log(`[SKIP_WORD] Jogador ${jId} ganhou 10 pontos por pular palavra em "${temaNome}"`);
         }
       }
     }
 
-    // 3. Salva a pontuação no banco de dados e constrói o payload 'roundDetails' para o frontend
-    // *** MODIFICADO: Usa roundDetails ***
-    roundDetails[temaNome] = {}
+    // 3. Persiste pontos no banco + monta payload pro frontend
+    roundDetails[temaNome] = {};
     for (const jId of allJogadorIds) {
-      const p = temaRespostas[jId].pontos
-      const resposta = temaRespostas[jId].resposta
-      
-      // Salva a pontuação (0, 5 ou 10) na tabela 'participacao_rodada'
-      await savePontuacao({ rodadaId: roundId, temaNome, jogadorId: jId, pontos: p })
-      
-      // Adiciona ao objeto que será enviado para o frontend
-      // *** MODIFICADO: Salva resposta E pontos ***
-      roundDetails[temaNome][jId] = { 
-        resposta: resposta, 
-        pontos: p 
-      }
+      const p = temaRespostas[jId].pontos;
+      const resposta = temaRespostas[jId].resposta;
+
+      await savePontuacao({
+        rodadaId: roundId,
+        temaNome,
+        jogadorId: jId,
+        pontos: p,
+      });
+
+      roundDetails[temaNome][jId] = {
+        resposta,
+        pontos: p,
+      };
     }
   }
 
-  // Calcula os totais acumulados para todos os jogadores na sala
-  const totais = await computeTotaisSala({ salaId })
+  const totais = await computeTotaisSala({ salaId });
+  await supa.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId);
 
-  // ✅ Marca a rodada como concluída no banco de dados
-  await supa.from('rodada').update({ status: 'done' }).eq('rodada_id', roundId)
-
-  // Retorna o resultado da rodada e os totais
-  // *** MODIFICADO: Retorna roundDetails ***
-  return { roundId, roundDetails, totais }
+  return { roundId, roundDetails, totais };
 }
+
 /**
  * *** PASSO 4 - MODIFICAÇÃO 1 TERMINA AQUI ***
  */
@@ -469,92 +471,109 @@ export async function getRoundResults({ salaId, roundId }) {
    Sorteio coerente (letra com >=4 temas)
 ========================= */
 export async function generateCoherentRounds({ totalRounds = 5 }) {
-  // 1) Carrega toda a resposta_base (paginando para evitar limites)
-  let allRows = []
-  let from = 0
-  const pageSize = 1000 // Limite padrão do Supabase
+  // 1) Carrega TODAS as combinações de letra x tema que existem na resposta_base
+  let allRows = [];
+  let from = 0;
+  const pageSize = 1000;
+
   while (true) {
     const { data, error } = await supa
       .from('resposta_base')
       .select('tema_id, letra_id')
-      .range(from, from + pageSize - 1)
-    if (error) throw error
-    if (!data?.length) break // Sai se não houver mais dados
-    allRows = allRows.concat(data)
-    if (data.length < pageSize) break // Sai se a última página não estava cheia
-    from += pageSize // Prepara para a próxima página
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+
+    allRows = allRows.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
   }
 
-  // 2) Monta mapa: letra_id -> Set<tema_id>
-  const mapa = {}
+  // 2) Monta mapa: letra_id -> Set(tema_id) (somente temas que têm dicionário)
+  const mapa = {};
   for (const r of allRows || []) {
-    const lid = Number(r.letra_id)
-    const tid = Number(r.tema_id)
-    if (!mapa[lid]) mapa[lid] = new Set()
-    mapa[lid].add(tid)
+    const lid = Number(r.letra_id);
+    const tid = Number(r.tema_id);
+    if (!mapa[lid]) mapa[lid] = new Set();
+    mapa[lid].add(tid);
   }
 
-  // 3) Filtra letras que têm pelo menos 4 temas associados com respostas
+  // 3) Filtra letras que têm pelo menos 4 temas
   const letrasValidas = Object.entries(mapa)
     .filter(([_, temasSet]) => temasSet.size >= 4)
-    .map(([lid]) => Number(lid)) // Pega apenas os IDs das letras
+    .map(([lid]) => Number(lid));
 
-  // Verifica se há letras suficientes para o número de rodadas desejado
   if (letrasValidas.length < totalRounds) {
-    console.error(`[generateCoherentRounds] Banco insuficiente: Encontradas ${letrasValidas.length} letras com >=4 temas, mas são necessárias ${totalRounds}.`);
-    // Poderia retornar um erro ou tentar gerar com menos rodadas?
-    // Por enquanto, lança um erro para indicar o problema.
-    throw new Error('Banco insuficiente: faltam letras com >=4 temas para gerar as rodadas.')
+    throw new Error(
+      `Não há letras suficientes com >= 4 temas em resposta_base para gerar ${totalRounds} rodadas.`
+    );
   }
 
-  // 4) Embaralha as letras válidas e seleciona o número necessário (sem repetição)
-  const pool = [...letrasValidas]
-  for (let i = pool.length - 1; i > 0; i--) { // Algoritmo Fisher-Yates shuffle
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+  // 4) Embaralha e escolhe as letras
+  const pool = [...letrasValidas];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  const letrasEscolhidas = pool.slice(0, totalRounds) // Pega as primeiras 'totalRounds' letras embaralhadas
+  const letrasEscolhidas = pool.slice(0, totalRounds);
 
-  // 5) Busca nomes das letras e temas para usar no payload final
+  // 5) Busca nomes das letras
   const { data: letrasTbl, error: eL } = await supa
     .from('letra')
     .select('letra_id, letra_caractere')
-    .in('letra_id', letrasEscolhidas) // Otimiza buscando só as letras escolhidas
-  if (eL) throw eL
+    .in('letra_id', letrasEscolhidas);
+  if (eL) throw eL;
 
-  const { data: temasTbl, error: eT } = await supa
-    .from('tema')
-    .select('tema_id, tema_nome')
-    // Busca todos os temas, pois precisaremos deles para mapear os IDs sorteados
-  if (eT) throw eT
-  // Cria um mapa ID -> Nome para busca rápida
-  const temaIdToName = temasTbl.reduce((acc, t) => { acc[t.tema_id] = t.tema_nome; return acc; }, {});
-
-  // 6) Monta a estrutura final das rodadas
-  const rounds = []
-  for (const letra_id of letrasEscolhidas) {
-    const temasPossiveisParaLetra = [...(mapa[letra_id] || [])] // Pega os temas válidos para esta letra
-    // Embaralha os temas possíveis para esta letra
-    for (let i = temasPossiveisParaLetra.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[temasPossiveisParaLetra[i], temasPossiveisParaLetra[j]] = [temasPossiveisParaLetra[j], temasPossiveisParaLetra[i]]
-    }
-    // Seleciona os 4 primeiros temas embaralhados
-    const temasEscolhidosIds = temasPossiveisParaLetra.slice(0, 4)
-
-    // Monta o objeto da rodada com IDs e nomes
-    rounds.push({
-      letra_id,
-      letra_char: letrasTbl.find(l => l.letra_id === letra_id)?.letra_caractere || '?', // Busca o caractere da letra
-      temas: temasEscolhidosIds.map(tid => ({
-        tema_id: tid,
-        tema_nome: temaIdToName[tid] || `Tema ${tid}?` // Busca o nome do tema no mapa
-      }))
-    })
+  const letraIdToChar = {};
+  for (const l of letrasTbl || []) {
+    letraIdToChar[Number(l.letra_id)] = l.letra_caractere;
   }
 
-  return rounds // Retorna a lista de rodadas prontas para serem inseridas no banco
+  // 6) Busca todos os temas para mapear id -> nome
+  const { data: temasTbl, error: eT } = await supa
+    .from('tema')
+    .select('tema_id, tema_nome');
+  if (eT) throw eT;
+
+  const temaIdToName = {};
+  for (const t of temasTbl || []) {
+    temaIdToName[Number(t.tema_id)] = t.tema_nome;
+  }
+
+  // 7) Monta as rodadas no FORMATO ESPERADO por /matches/start:
+  //    { letra_id, letra_char, temas: [{ tema_id, tema_nome }] }
+  const rounds = [];
+  for (const letra_id of letrasEscolhidas) {
+    const temasPossiveisParaLetra = [...(mapa[letra_id] || [])];
+
+    // Embaralha temas
+    for (let i = temasPossiveisParaLetra.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [temasPossiveisParaLetra[i], temasPossiveisParaLetra[j]] = [
+        temasPossiveisParaLetra[j],
+        temasPossiveisParaLetra[i]
+      ];
+    }
+
+    const temasEscolhidosIds = temasPossiveisParaLetra.slice(0, 4);
+
+    const temasObjs = temasEscolhidosIds.map(id => ({
+      tema_id: id,
+      tema_nome: temaIdToName[id] || ''
+    }));
+
+    rounds.push({
+      letra_id,
+      letra_char: letraIdToChar[letra_id] || '',
+      temas: temasObjs
+    });
+  }
+
+  return rounds;
 }
+
+
 
 /* =========================
    LETRAS sem repetição (fallback antigo - manter caso precise?)
