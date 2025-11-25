@@ -11,6 +11,7 @@ import answersRouter from '../routes/answers.js'
 import matchesRouter from '../routes/matches.js'
 import shopRouter from '../routes/shop.js'
 import rankingRouter from '../routes/ranking.js' 
+import feedbackRouter from '../routes/feedback.js'
 
 import { initSockets } from './sockets.js'
 
@@ -26,6 +27,7 @@ app.use('/answers', answersRouter)
 app.use('/matches', matchesRouter)
 app.use('/shop', shopRouter)
 app.use('/ranking', rankingRouter)
+app.use('/feedback', feedbackRouter)
 
 // Healthcheck
 app.get('/health', (req, res) => res.json({ ok: true }))

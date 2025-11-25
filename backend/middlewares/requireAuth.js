@@ -22,7 +22,7 @@ const requireAuth = async (req, res, next) => {
     // 3. Buscar o jogador no banco (igual ao routes/auth.js)
     const { data: jogador, error } = await supa
       .from('jogador')
-      .select('jogador_id, nome_de_usuario, email, avatar_nome, personagem_nome') // Já pegamos o avatar aqui também
+      .select('jogador_id, nome_de_usuario, email, avatar_nome, personagem_nome, role') // Já pegamos o avatar aqui também
       .eq('jogador_id', jogador_id)
       .maybeSingle()
 

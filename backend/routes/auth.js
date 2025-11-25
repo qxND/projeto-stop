@@ -81,7 +81,7 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body
     if (!email || !password) return res.status(400).json({ error: 'email e senha obrigatórios' })
 
-    const { data: user, error } = await supa.from('jogador').select('jogador_id, nome_de_usuario, email, senha_hash').eq('email', email).maybeSingle()
+    const { data: user, error } = await supa.from('jogador').select('jogador_id, nome_de_usuario, email, senha_hash, role').eq('email', email).maybeSingle()
     if (error) throw error
     if (!user) return res.status(401).json({ error: 'Credenciais invalidas' })
 
@@ -90,7 +90,7 @@ router.post('/login', async (req, res) => {
 
     const token = jwt.sign({ sub: user.jogador_id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
     // return user without senha_hash
-    const jogador = { jogador_id: user.jogador_id, nome_de_usuario: user.nome_de_usuario, email: user.email }
+    const jogador = { jogador_id: user.jogador_id, nome_de_usuario: user.nome_de_usuario, email: user.email, role: user.role }
     res.json({ token, jogador })
   } catch (e) {
     res.status(500).json({ error: e.message })

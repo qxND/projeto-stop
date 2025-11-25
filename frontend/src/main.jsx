@@ -13,6 +13,8 @@ import Login from './pages/Login'
 import ProfileScreen from './pages/ProfileScreen'
 import RankingScreen from './pages/RankingScreen'
 import IntroScreen from './pages/IntroScreen';
+import AboutUsScreen from './pages/AboutUsScreen';
+import FeedbackScreen from './pages/FeedbackScreen';
 import './index.css'
 
 function RequireAuth({ children }) {
@@ -65,6 +67,14 @@ const router = createBrowserRouter([
       {
         path: 'ranking/sala/:salaId',
         element: <RankingScreen />
+      },
+      {
+        path: 'about-us',
+        element: <AboutUsScreen />
+      },
+      {
+        path: 'feedback',
+        element: <FeedbackScreen />
       }
     ],
   },

@@ -1,7 +1,7 @@
 // src/pages/HomeScreen.jsx
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Store, LogOut, Trophy } from 'lucide-react'; // Ícones
+import { Play, Store, LogOut, Trophy, Info } from 'lucide-react'; // Ícones
 import CyberLogo from '../components/CyberLogo'; // Importa o componente 3D
 import GlitchText from '../components/GlitchText'; // Importa o componente de texto com glitch
 import PixelBlast from '../components/PixelBlast';
@@ -72,6 +72,17 @@ export default function HomeScreen() {
           >
             <Trophy size={24} />
             Ranking
+          </button>
+          <button
+            onClick={() => navigate('/about-us')}
+            className="w-full bg-gray-500 text-black font-bold py-4 px-6 text-xl flex items-center justify-center gap-3
+                       transition-transform duration-300 hover:scale-105 hover:[transform:translateZ(20px)]
+                       shadow-lg shadow-gray-500/20
+                       cursor-target"
+            data-augmented-ui="tl-clip tr-clip br-clip bl-clip border"
+          >
+            <Info size={24} />
+            Sobre Nós
           </button>
         </div>
       </div>

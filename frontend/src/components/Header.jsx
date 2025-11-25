@@ -8,47 +8,8 @@ import socket from '../lib/socket';
 import { stopAudio } from '../lib/audio';
 import { useExitConfirmation } from '../hooks/useExitConfirmation';
 import ExitConfirmationModal from './ExitConfirmationModal';
+import { useUserData } from '../hooks/useUserData';
 
-/**
- * Hook simples para pegar dados do usuário (sem Context)
- */
-function useUserData() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const { data } = await api.get('/auth/me');
-        setUser(data.jogador);
-      } catch (error) {
-        console.error('Erro ao buscar dados do usuário:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (localStorage.getItem('token')) {
-      fetchUser();
-    } else {
-      setLoading(false);
-    }
-
-    const handleUserUpdate = (event) => {
-      if (event.detail) {
-        setUser(event.detail);
-      }
-    };
-
-    window.addEventListener('userUpdated', handleUserUpdate);
-
-    return () => {
-      window.removeEventListener('userUpdated', handleUserUpdate);
-    };
-  }, []);
-
-  return { user, loading };
-}
 
 export default function Header({ volume, onVolumeChange }) {
   const navigate = useNavigate();
@@ -259,7 +220,17 @@ export default function Header({ volume, onVolumeChange }) {
             />
             <div className="hidden md:flex flex-col text-left">
               <span className="text-sm font-semibold text-white">{user?.nome_de_usuario || 'Jogador'}</span>
-              <Link to="/profile" className="text-xs text-text-muted hover:text-primary cursor-target">Ver Perfil</Link>
+              <div className="flex gap-2">
+                <Link to="/profile" className="text-xs text-text-muted hover:text-primary cursor-target">Ver Perfil</Link>
+                <span className="text-xs text-text-muted">|</span>
+                <Link to="/about" className="text-xs text-text-muted hover:text-primary cursor-target">Sobre Nós</Link>
+                {user?.role === 'admin' && (
+                  <>
+                    <span className="text-xs text-text-muted">|</span>
+                    <Link to="/feedback" className="text-xs text-yellow-400 hover:text-yellow-300 cursor-target">Admin</Link>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 

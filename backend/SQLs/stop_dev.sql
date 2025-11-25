@@ -47,6 +47,16 @@ CREATE TABLE public.convite (
   CONSTRAINT convite_jogador_convidado_id_fkey FOREIGN KEY (jogador_convidado_id) REFERENCES public.jogador(jogador_id),
   CONSTRAINT convite_sala_id_fkey FOREIGN KEY (sala_id) REFERENCES public.sala(sala_id)
 );
+CREATE TABLE public.feedback (
+  feedback_id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  jogador_id bigint,
+  nome_jogador text,
+  feedback_message text NOT NULL,
+  feedback_type text NOT NULL CHECK (feedback_type = ANY (ARRAY['improvement'::text, 'bug_report'::text, 'compliment'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT feedback_pkey PRIMARY KEY (feedback_id),
+  CONSTRAINT fk_jogador FOREIGN KEY (jogador_id) REFERENCES public.jogador(jogador_id)
+);
 CREATE TABLE public.fonte (
   fonte_id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   nome text NOT NULL,
@@ -121,6 +131,12 @@ CREATE TABLE public.letra (
   data_hora_criacao timestamp with time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'::text),
   CONSTRAINT letra_pkey PRIMARY KEY (letra_id)
 );
+CREATE TABLE public.letra_semZXYW (
+  letra_id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  letra_caractere text NOT NULL UNIQUE,
+  data_hora_criacao timestamp with time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'::text),
+  CONSTRAINT letra_semZXYW_pkey PRIMARY KEY (letra_id)
+);
 CREATE TABLE public.pacote (
   pacote_id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   nome text NOT NULL UNIQUE,
@@ -158,6 +174,15 @@ CREATE TABLE public.participacao_rodada_tema (
   CONSTRAINT participacao_rodada_tema_jogador_sala_rodada_id_fkey FOREIGN KEY (jogador_sala_rodada_id) REFERENCES public.jogador_sala_rodada_legado(jogador_sala_rodada_id),
   CONSTRAINT participacao_rodada_tema_rodada_tema_id_fkey FOREIGN KEY (rodada_tema_id) REFERENCES public.rodada_tema(rodada_tema_id),
   CONSTRAINT participacao_rodada_tema_resposta_base_id_fkey FOREIGN KEY (resposta_base_id) REFERENCES public.resposta_base(resposta_base_id)
+);
+CREATE TABLE public.password_reset (
+  id bigint NOT NULL DEFAULT nextval('password_reset_id_seq'::regclass),
+  jogador_id bigint NOT NULL,
+  token text NOT NULL UNIQUE,
+  expires_at timestamp with time zone NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT password_reset_pkey PRIMARY KEY (id),
+  CONSTRAINT password_reset_jogador_id_fkey FOREIGN KEY (jogador_id) REFERENCES public.jogador(jogador_id)
 );
 CREATE TABLE public.ranking (
   ranking_id integer NOT NULL DEFAULT nextval('ranking_ranking_id_seq'::regclass),
