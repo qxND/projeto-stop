@@ -223,7 +223,7 @@ export default function Header({ volume, onVolumeChange }) {
               <div className="flex gap-2">
                 <Link to="/profile" className="text-xs text-text-muted hover:text-primary cursor-target">Ver Perfil</Link>
                 <span className="text-xs text-text-muted">|</span>
-                <Link to="/about" className="text-xs text-text-muted hover:text-primary cursor-target">Sobre Nós</Link>
+                <Link to="/about-us" className="text-xs text-text-muted hover:text-primary cursor-target">Sobre Nós</Link>
                 {user?.role === 'admin' && (
                   <>
                     <span className="text-xs text-text-muted">|</span>
